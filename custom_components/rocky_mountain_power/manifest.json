@@ -1,0 +1,12 @@
+{
+  "domain": "rocky_mountain_power",
+  "name": "Rocky Mountain Power",
+  "codeowners": ["@jimatardua"],
+  "config_flow": true,
+  "dependencies": ["recorder"],
+  "documentation": "https://github.com/jimatardua/home-intelligence/blob/main/docs/rmp-integration.md",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": ["requests>=2.31.0", "cryptography>=41.0.0"],
+  "version": "1.0.0"
+}
