@@ -6,6 +6,11 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.1] - 2026-07-15
+
+- Right-align the TOU report's sensitivity table "Annual Impact" header to
+  match its already-right-aligned data cells.
+
 ## [1.0.0] - 2026-07-15
 
 Baseline release, capturing everything already deployed and in active use
