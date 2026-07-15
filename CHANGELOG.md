@@ -6,6 +6,12 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.3] - 2026-07-15
+
+- Rename the TOU report's "Difference" KPI card to "Estimated TOU Penalty"
+  or "Estimated TOU Savings" depending on sign, and color the value red
+  (cost) or green (savings) to match the sensitivity table's convention.
+
 ## [1.0.2] - 2026-07-15
 
 - Show units (kWh) in the TOU report's chart tooltips, matching the y-axis

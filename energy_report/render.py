@@ -145,7 +145,18 @@ def render_report(ctx: ReportContext) -> str:
     seasons_str = ", ".join(sorted(ctx.seasons_observed)) if ctx.seasons_observed else "none"
 
     diff = ctx.observed_tou_cost - ctx.observed_schedule1_cost
-    diff_label = "more" if diff >= 0 else "less"
+    if diff > 0:
+        diff_heading = "Estimated TOU Penalty"
+        diff_class = "impact-neg"
+        diff_sub = "TOU would have cost this much more over this window"
+    elif diff < 0:
+        diff_heading = "Estimated TOU Savings"
+        diff_class = "impact-pos"
+        diff_sub = "TOU would have saved this much over this window"
+    else:
+        diff_heading = "No Difference"
+        diff_class = ""
+        diff_sub = "TOU and standard costs were identical over this window"
 
     summer_monthly = ctx.summer_monthly_projection
     summer_annual = ctx.summer_annual_projection
@@ -232,9 +243,9 @@ footer{{text-align:center;font-size:11px;color:var(--muted);padding:10px 0}}
     <div class="kpi-sub">Same hours, TOU rates</div>
   </div>
   <div class="kpi diff">
-    <div class="kpi-label">Difference</div>
-    <div class="kpi-value">{_fmt_money(abs(diff))}</div>
-    <div class="kpi-sub">TOU would have cost {diff_label} over this window</div>
+    <div class="kpi-label">{diff_heading}</div>
+    <div class="kpi-value {diff_class}">{_fmt_money(abs(diff))}</div>
+    <div class="kpi-sub">{diff_sub}</div>
   </div>
 </div>
 
