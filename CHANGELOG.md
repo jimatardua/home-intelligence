@@ -1,0 +1,26 @@
+# Changelog
+
+All notable changes to this project are documented here. Version is tracked
+in the root `VERSION` file (this project has no single package manifest, so
+`VERSION` is the canonical source of truth; the RMP HA integration's own
+`manifest.json` version is independent, scoped to Home Assistant's own
+per-integration update tracking).
+
+## [1.0.0] - 2026-07-15
+
+Baseline release, capturing everything already deployed and in active use
+on domus:
+
+- Custom Rocky Mountain Power Home Assistant integration
+  (`custom_components/rocky_mountain_power/`) — reverse-engineered Azure B2C
+  auth and client-side RSA-4096/AES-GCM request encryption, hourly usage
+  imported as HA external statistics plus a raw JSON archive. See
+  [docs/rmp-integration.md](docs/rmp-integration.md).
+- Daily Energy Story dashboard (apexcharts-card) combining RMP power,
+  temperature, A/C, and EV charging on one full-width panel view.
+- RMP Standard-vs-Time-of-Use cost comparison report (`energy_report/`) — a
+  cron-generated static HTML report disaggregating usage into A/C, EV
+  charging (per car), and baseline load, comparing observed/projected costs
+  under both rate plans, and a per-lever sensitivity table (e.g. delaying EV
+  charging, reducing on-peak A/C runtime). Deployed to domus, served via
+  nginx at `/energy-report/`. See [docs/tou-report.md](docs/tou-report.md).
