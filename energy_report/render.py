@@ -294,6 +294,9 @@ function setTab(name, btn) {{
 const commonOpts = {{
   responsive: true, maintainAspectRatio: false, animation: false,
   interaction: {{mode: 'index', intersect: false}},
+  plugins: {{
+    tooltip: {{callbacks: {{label: ctx => `${{ctx.dataset.label}}: ${{ctx.parsed.y}} kWh`}}}}
+  }},
   scales: {{
     x: {{stacked: true, grid: {{display: false}}, ticks: {{font: {{size: 10}}}}}},
     y: {{stacked: true, beginAtZero: true, grid: {{color: 'rgba(0,0,0,0.04)'}}, ticks: {{font: {{size: 10}}, callback: v => v + ' kWh'}}}}

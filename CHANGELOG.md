@@ -6,6 +6,12 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.2] - 2026-07-15
+
+- Show units (kWh) in the TOU report's chart tooltips, matching the y-axis
+  labels (Chart.js doesn't apply an axis tick formatter to tooltips
+  automatically).
+
 ## [1.0.1] - 2026-07-15
 
 - Right-align the TOU report's sensitivity table "Annual Impact" header to
