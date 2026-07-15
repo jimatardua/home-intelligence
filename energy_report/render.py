@@ -196,7 +196,8 @@ header .meta{{font-size:12px;color:rgba(255,255,255,.55)}}
 table.sensitivity{{width:100%;border-collapse:collapse;font-size:13px}}
 table.sensitivity th{{text-align:left;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding-bottom:8px;border-bottom:1px solid #e2e6ea}}
 table.sensitivity td{{padding:9px 0;border-bottom:1px solid #f0f2f5}}
-table.sensitivity td:last-child{{text-align:right;font-weight:700}}
+table.sensitivity th:last-child,table.sensitivity td:last-child{{text-align:right}}
+table.sensitivity td:last-child{{font-weight:700}}
 .impact-pos{{color:#16794f}}
 .impact-neg{{color:#c0392b}}
 .muted{{color:var(--muted);font-weight:400 !important}}
