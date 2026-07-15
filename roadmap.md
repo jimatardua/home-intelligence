@@ -125,6 +125,21 @@ Energy
   power. Needs a couple of weeks of normal use (ideally spanning some hot
   afternoons) before the correlation view shows anything meaningful, since
   the underlying entities are brand new.
+- ~~Daily Energy Story~~ — a second view on the "Energy & Comfort"
+  dashboard: one apexcharts-card overlaying all six signals (whole-house
+  power from RMP, indoor/outdoor temp, AC running, both cars' charging
+  power) on a single shared time axis, so "was the spike from charging or
+  HVAC" is a direct visual read instead of cross-referencing two separate
+  cards. Both views converted from `masonry` to `panel` type so the charts
+  use the full window width instead of a cramped multi-column layout.
+  Hit a real, non-obvious HA recorder bug along the way: a statistic
+  whose metadata has `has_sum=False` silently gets its `state` column
+  dropped from every query, regardless of what's actually asked for or
+  what's genuinely in the database — full story in
+  `docs/rmp-integration.md`'s "Known risks" section. Chart currently
+  defaults to two days back (`span: offset: -2d`) rather than "today" or
+  "yesterday", since RMP's own reporting lag isn't fixed at exactly one
+  day; expect to need to nudge that offset occasionally.
 
 Goal:
 

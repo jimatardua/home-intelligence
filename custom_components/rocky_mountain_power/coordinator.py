@@ -30,6 +30,7 @@ from homeassistant.components.recorder.models import (
 )
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
+    async_import_statistics,
     statistics_during_period,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -43,6 +44,8 @@ from .api import CannotConnect, InvalidAuth, RockyMountainPowerClient, Unexpecte
 from .const import (
     ARCHIVE_DIR_NAME,
     DOMAIN,
+    HOURLY_USAGE_ENTITY_ID,
+    HOURLY_USAGE_NAME,
     LOGGER,
     LOOKBACK_DAYS,
     STATISTIC_ID,
@@ -86,6 +89,7 @@ class RockyMountainPowerCoordinator(DataUpdateCoordinator[None]):
         self.last_successful_sync: datetime | None = None
         self.last_poll_duration_seconds: float | None = None
         self.latest_interval_date: date | None = None
+        self.latest_hourly_usage: float | None = None
 
     async def _async_update_data(self) -> None:
         start_time = monotonic()
@@ -152,11 +156,12 @@ class RockyMountainPowerCoordinator(DataUpdateCoordinator[None]):
 
         running_sum = base_sum
         statistics: list[StatisticData] = []
+        entity_statistics: list[StatisticData] = []
         for start, usage in entries:
             running_sum += usage
-            statistics.append(
-                StatisticData(start=dt_util.as_utc(start), state=usage, sum=running_sum)
-            )
+            start_utc = dt_util.as_utc(start)
+            statistics.append(StatisticData(start=start_utc, state=usage, sum=running_sum))
+            entity_statistics.append(StatisticData(start=start_utc, state=usage, sum=running_sum))
 
         metadata = StatisticMetaData(
             mean_type=StatisticMeanType.NONE,
@@ -169,6 +174,38 @@ class RockyMountainPowerCoordinator(DataUpdateCoordinator[None]):
         )
         LOGGER.debug("Importing %d hourly statistics entries", len(statistics))
         async_add_external_statistics(self.hass, metadata, statistics)
+
+        # Backdate the same hourly values onto a real entity's own
+        # statistics too (source="recorder", not our domain) -- purely so
+        # third-party dashboard cards that require an entity to exist in
+        # hass.states (e.g. apexcharts-card) can chart this data. The
+        # external statistic above remains the Energy Dashboard's source of
+        # truth; this is a parallel, display-only mirror.
+        #
+        # has_sum MUST be True here even though we don't need a running
+        # total for display: HA's own statistics_during_period silently
+        # discards the "state" column from every query whenever a
+        # statistic's metadata has has_sum=False (see
+        # _extract_metadata_and_discard_impossible_columns in
+        # homeassistant/components/recorder/statistics.py) -- confirmed by
+        # reading that source directly after apexcharts-card kept getting
+        # back empty results despite the raw DB rows being correct. Without
+        # this, no historical-statistics-reading dashboard card can ever
+        # get a "state" value back for this entity, regardless of what it
+        # requests.
+        entity_metadata = StatisticMetaData(
+            mean_type=StatisticMeanType.NONE,
+            has_sum=True,
+            name=HOURLY_USAGE_NAME,
+            source="recorder",
+            statistic_id=HOURLY_USAGE_ENTITY_ID,
+            unit_class=EnergyConverter.UNIT_CLASS,
+            unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        )
+        async_import_statistics(self.hass, entity_metadata, entity_statistics)
+
+        if entries:
+            self.latest_hourly_usage = entries[-1][1]
 
 
 def _ensure_dir(path: str) -> None:

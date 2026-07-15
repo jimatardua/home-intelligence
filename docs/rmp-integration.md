@@ -171,7 +171,19 @@ Raw JSON archive (one file per day)
   credentials with a real login + account-resolution call before creating
   the config entry.
 - **`__init__.py`** — standard `async_setup_entry` / `async_unload_entry`,
-  creates the client + coordinator, stores them in `hass.data[DOMAIN]`.
+  creates the client + coordinator, stores the coordinator on
+  `entry.runtime_data`, forwards to the `sensor` platform.
+- **`sensor.py`** — one entity, `sensor.rocky_mountain_power_hourly_usage`,
+  that exists purely so third-party dashboard cards (e.g. apexcharts-card)
+  can chart this data — they require an entity to exist in `hass.states`,
+  which the colon-form external statistic above deliberately doesn't have.
+  Its live state is just "the latest known hourly value"; the real
+  backdated hourly curve lives in this entity's own long-term statistics,
+  injected in parallel by the coordinator via
+  `async_import_statistics(source="recorder")`. Deliberately has no
+  `state_class`, so it's excluded from HA's own automatic statistics
+  compilation (which would otherwise fight with our backdated imports).
+  See "Known risks" for a sharp edge this design hit.
 - **`diagnostics.py`** — Settings → Devices & Services → Rocky Mountain
   Power → Download Diagnostics. Exposes: `authenticated`,
   `last_successful_sync`, agreement IDs (redacted), `latest_interval_date`,
@@ -215,6 +227,31 @@ Raw JSON archive (one file per day)
   single-register residential meter, not something derived from any API
   response. Accounts with a different meter/register configuration (e.g.
   time-of-use, net metering with production) may need a different value.
+- **HA's recorder silently drops the "state" column from any statistics
+  query for a statistic whose metadata has `has_sum=False`** — found by
+  reading `_extract_metadata_and_discard_impossible_columns` in
+  `homeassistant/components/recorder/statistics.py`:
+  `if not has_sum: types.discard("sum"); types.discard("state")`. This bit
+  `sensor.rocky_mountain_power_hourly_usage`: it was originally created
+  with `has_sum=False` (seemed correct — display-only, no cumulative total
+  needed), which meant `statistics_during_period` requests for `"state"`
+  came back empty *no matter what the caller asked for or how the data
+  was queried* — confirmed by fetching the raw recorder DB rows directly
+  (real values present) while the same query through HA's own API
+  returned nothing. Fixed by setting `has_sum=True` on this entity's
+  metadata and giving it a (otherwise-unused) running `sum` too, purely to
+  unlock "state" retrieval. If this entity's statistics ever need
+  recreating, keep `has_sum=True` even though nothing here actually reads
+  the sum.
+- **The Daily Energy Story dashboard view defaults to `span: {start: day,
+  offset: -2d}`** (two days back), not "today" or "yesterday" — because
+  RMP's own reporting lag is not fixed at exactly one day and was
+  observed running close to two days during testing. This offset will
+  need occasional manual adjustment in `/config/.storage/lovelace.energy_comfort`
+  as RMP's actual lag drifts; apexcharts-card can't compute this
+  dynamically (`span.offset` doesn't support templates). Panning/zooming
+  the chart in the browser still works for viewing other days once more
+  history accumulates.
 
 ## Status
 

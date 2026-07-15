@@ -66,4 +66,16 @@ SESSION_MAX_AGE = timedelta(hours=6)
 STATISTIC_ID = f"{DOMAIN}:energy_consumption"
 STATISTIC_NAME = "Rocky Mountain Power Energy Consumption"
 
+# A real entity carrying the same backdated hourly data, purely so
+# third-party dashboard cards (e.g. apexcharts-card) that require an entity
+# to exist in hass.states can chart it -- the colon-form external statistic
+# above deliberately has no backing entity (see docs/rmp-integration.md's
+# "why external statistics" section), which every such card rejects.
+# Its long-term statistics are backdated the same way, via
+# async_import_statistics(source="recorder"), not derived from its live
+# state history.
+HOURLY_USAGE_ENTITY_ID = "sensor.rocky_mountain_power_hourly_usage"
+HOURLY_USAGE_UNIQUE_ID = f"{DOMAIN}_hourly_usage"
+HOURLY_USAGE_NAME = "Hourly Usage"
+
 ARCHIVE_DIR_NAME = "rocky_mountain_power_archive"
