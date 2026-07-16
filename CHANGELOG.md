@@ -6,6 +6,16 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.4] - 2026-07-16
+
+- Regenerate the TOU report every 2 hours instead of once daily, so it
+  isn't a full day stale whenever it happens to run before RMP's own
+  archive updates for that day. (Root cause of the staleness this was
+  fixing: domus's OS clock was set to Europe/London instead of
+  America/Denver, shifting cron's actual fire time by 7 hours from what
+  was intended -- fixed at the OS level separately; this change makes the
+  report robust to that kind of clock/scheduling drift regardless.)
+
 ## [1.0.3] - 2026-07-15
 
 - Rename the TOU report's "Difference" KPI card to "Estimated TOU Penalty"

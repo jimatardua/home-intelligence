@@ -14,7 +14,7 @@ that deserve to be shown, not a live dashboard tile. HA is the data
 collection layer only; this report is generated separately, the same way
 `~/Developer/infrastructure` generates its speedtest/bandwidth dashboards:
 a self-contained stdlib Python script reads the data, renders a static
-Chart.js HTML page, cron regenerates it daily, nginx serves it.
+Chart.js HTML page, cron regenerates it every 2 hours, nginx serves it.
 
 ## Confirmed tariff data (RMP Schedule 1, Utah, effective Dec 1, 2025)
 
@@ -97,7 +97,11 @@ buried.
 **Cron sequencing** doesn't chase RMP's variable daily-poll time -- the
 report is self-describing, using each archive file's own `fetched_at`
 rather than wall-clock `now()`, the same defensive pattern the Daily Energy
-Story dashboard already uses for its `-2d` span offset.
+Story dashboard already uses for its `-2d` span offset. Runs every 2 hours
+(not once daily) precisely so it doesn't need to guess when RMP's own
+coordinator actually refreshes the archive on a given day -- whichever run
+happens after that day's real update picks it up within a couple hours,
+rather than waiting up to 24.
 
 ## File layout
 

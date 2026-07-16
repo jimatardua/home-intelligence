@@ -32,7 +32,7 @@ echo
 cat <<'EOF'
 --- 1. Cron entry (crontab -e on domus) ---------------------------------
 
-17 5 * * * cd /opt/home-intelligence && /usr/bin/python3 -m energy_report.generate_report --archive-dir /var/lib/homeassistant/homeassistant/rocky_mountain_power_archive --db-path /var/lib/homeassistant/homeassistant/home-assistant_v2.db --output /opt/home-intelligence/energy_report/output/index.html >> /opt/home-intelligence/energy_report/cron.log 2>&1
+17 */2 * * * cd /opt/home-intelligence && /usr/bin/python3 -m energy_report.generate_report --archive-dir /var/lib/homeassistant/homeassistant/rocky_mountain_power_archive --db-path /var/lib/homeassistant/homeassistant/home-assistant_v2.db --output /opt/home-intelligence/energy_report/output/index.html >> /opt/home-intelligence/energy_report/cron.log 2>&1
 
 Note: this must run as `python3 -m energy_report.generate_report` with cwd
 /opt/home-intelligence (not a direct script path) -- generate_report.py
