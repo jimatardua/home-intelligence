@@ -20,6 +20,7 @@ rsync -av --delete \
   --exclude '.pytest_cache' \
   --exclude 'tests' \
   --exclude 'output' \
+  --exclude 'cron.log' \
   --exclude 'deploy.sh' \
   "${SCRIPT_DIR}/" "${HOST}:${REMOTE_DIR}/"
 

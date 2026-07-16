@@ -314,6 +314,19 @@ const commonOpts = {{
   }}
 }};
 
+const disaggOpts = {{
+  ...commonOpts,
+  plugins: {{
+    ...commonOpts.plugins,
+    tooltip: {{
+      callbacks: {{
+        label: ctx => `${{ctx.dataset.label}}: ${{ctx.parsed.y}} kWh`,
+        footer: items => `Total: ${{items.reduce((sum, item) => sum + item.parsed.y, 0).toFixed(2)}} kWh`
+      }}
+    }}
+  }}
+}};
+
 new Chart(document.getElementById('disaggChart'), {{
   type: 'bar',
   data: {{
@@ -324,7 +337,7 @@ new Chart(document.getElementById('disaggChart'), {{
       {{label: 'Other/baseline', data: SERIES.other, backgroundColor: '#94a3b8'}},
     ]
   }},
-  options: commonOpts
+  options: disaggOpts
 }});
 
 new Chart(document.getElementById('peakChart'), {{

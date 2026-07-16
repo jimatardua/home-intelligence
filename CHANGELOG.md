@@ -6,6 +6,14 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.5] - 2026-07-16
+
+- Add a "Total" line to the usage breakdown chart's tooltip (sum of A/C, EV,
+  and other/baseline for that day), via Chart.js's `tooltip.callbacks.footer`.
+- Fix `deploy.sh`: its rsync `--delete` was deleting domus's `cron.log` on
+  every redeploy since it wasn't excluded like `output/` was -- discovered
+  when this deploy wiped the log. Added `--exclude 'cron.log'`.
+
 ## [1.0.4] - 2026-07-16
 
 - Regenerate the TOU report every 2 hours instead of once daily, so it
