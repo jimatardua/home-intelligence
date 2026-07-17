@@ -90,6 +90,16 @@ numbers**: `other/baseline = total - A/C - EV`. Neither A/C nor EV charging
 is separately metered, so "other" absorbing any data-gap mis-attribution is
 the conservative, correct behavior -- not a bug.
 
+**Outdoor temperature vs. usage chart** correlates daily average outdoor
+temperature against total usage and A/C-specific usage (both in kWh, on the
+same axis -- A/C runtime hours is shown as a tooltip aside rather than a
+third chart axis, since it's a fixed multiple of A/C kWh under the constant-
+draw model). Temperature comes from `weather.forecast_home`'s `temperature`
+attribute -- weather entities store a condition string ("sunny") in their
+own `state` column, not the reading itself, so this reads
+`state_attributes` directly rather than the plain `state` column the other
+numeric sensors use.
+
 **Billing-month tiering** approximates with calendar-month boundaries
 (`BILLING_CYCLE_START_DAY`), stated explicitly in the report rather than
 buried.

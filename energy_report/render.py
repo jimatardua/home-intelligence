@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 import json
 
+from .disaggregation import AC_ESTIMATED_KW
+
 # Pinned exactly to match the reference bandwidth dashboards -- same CDN
 # versions and SRI hashes, copied verbatim so a browser that already
 # cached them for those pages doesn't need a second download.
@@ -46,6 +48,7 @@ class DailyBreakdown:
     offpeak_kwh: float
     hours_present: int
     hours_expected: int
+    avg_outdoor_temp_f: float | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +133,12 @@ def _chart_series(daily: list[DailyBreakdown]) -> dict:
         "offpeak": [round(d.offpeak_kwh, 2) for d in daily],
         "coverage_pct": [
             round(100 * d.hours_present / d.hours_expected, 1) if d.hours_expected else None
+            for d in daily
+        ],
+        "total": [round(d.ac_kwh + d.ev_kwh + d.other_kwh, 2) for d in daily],
+        "ac_hours": [round(d.ac_kwh / AC_ESTIMATED_KW, 1) for d in daily],
+        "temp_f": [
+            round(d.avg_outdoor_temp_f, 1) if d.avg_outdoor_temp_f is not None else None
             for d in daily
         ],
     }
@@ -285,6 +294,11 @@ footer{{text-align:center;font-size:11px;color:var(--muted);padding:10px 0}}
   <div class="chart-wrap"><canvas id="peakChart"></canvas></div>
 </div>
 
+<div class="card">
+  <h3>Outdoor temperature vs. usage</h3>
+  <div class="chart-wrap"><canvas id="tempChart"></canvas></div>
+</div>
+
 <footer>
   {ctx.guarantee_note}<br>
   Billing-month tiering approximated with calendar-month boundaries (actual RMP billing-cycle start date unknown).
@@ -350,6 +364,44 @@ new Chart(document.getElementById('peakChart'), {{
     ]
   }},
   options: commonOpts
+}});
+
+const tempOpts = {{
+  ...commonOpts,
+  plugins: {{
+    ...commonOpts.plugins,
+    tooltip: {{
+      callbacks: {{
+        label: ctx => {{
+          if (ctx.dataset.yAxisID === 'y1') {{
+            return `${{ctx.dataset.label}}: ${{ctx.parsed.y}}°F`;
+          }}
+          const aside = ctx.dataset.label === 'A/C (estimated)'
+            ? ` (~${{SERIES.ac_hours[ctx.dataIndex]}} hrs)`
+            : '';
+          return `${{ctx.dataset.label}}: ${{ctx.parsed.y}} kWh${{aside}}`;
+        }}
+      }}
+    }}
+  }},
+  scales: {{
+    x: {{grid: {{display: false}}, ticks: {{font: {{size: 10}}}}}},
+    y: {{beginAtZero: true, grid: {{color: 'rgba(0,0,0,0.04)'}}, ticks: {{font: {{size: 10}}, callback: v => v + ' kWh'}}}},
+    y1: {{position: 'right', grid: {{display: false}}, ticks: {{font: {{size: 10}}, callback: v => v + '°F'}}}}
+  }}
+}};
+
+new Chart(document.getElementById('tempChart'), {{
+  type: 'bar',
+  data: {{
+    labels: SERIES.labels,
+    datasets: [
+      {{type: 'bar', label: 'Total usage', data: SERIES.total, backgroundColor: '#94a3b8', yAxisID: 'y'}},
+      {{type: 'bar', label: 'A/C (estimated)', data: SERIES.ac, backgroundColor: '#d97706', yAxisID: 'y'}},
+      {{type: 'line', label: 'Outdoor temp (avg)', data: SERIES.temp_f, borderColor: '#2563eb', backgroundColor: '#2563eb', yAxisID: 'y1', spanGaps: false, tension: 0.3}},
+    ]
+  }},
+  options: tempOpts
 }});
 </script>
 </body>

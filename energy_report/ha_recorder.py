@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+import json
 import sqlite3
 
 from .archive_loader import LOCAL_TZ
@@ -129,4 +130,44 @@ def get_numeric_sensor_samples(
             samples.append(NumericSample(at_local=change.at_local, value=float(change.state)))
         except ValueError:
             samples.append(NumericSample(at_local=change.at_local, value=None))
+    return samples
+
+
+def get_weather_temperature_samples(
+    conn: sqlite3.Connection, entity_id: str, start: datetime, end: datetime
+) -> list[NumericSample]:
+    """Outdoor temperature samples from a weather entity's `temperature` attribute.
+
+    A weather entity's own `state` column holds a condition string (e.g.
+    "sunny"), not a number -- the actual reading lives in
+    `state_attributes.shared_attrs` (a JSON blob), joined via
+    `states.attributes_id`. A row with no attributes, unparseable JSON, or a
+    missing "temperature" key becomes `value=None` -- an explicit gap, same
+    convention as `get_numeric_sensor_samples()`, never a fabricated 0.
+    """
+    metadata_id = _metadata_id(conn, entity_id)
+    if metadata_id is None:
+        return []
+    rows = conn.execute(
+        """
+        SELECT sa.shared_attrs, s.last_updated_ts
+        FROM states s
+        LEFT JOIN state_attributes sa ON s.attributes_id = sa.attributes_id
+        WHERE s.metadata_id = ?
+          AND s.last_updated_ts >= ?
+          AND s.last_updated_ts < ?
+        ORDER BY s.last_updated_ts
+        """,
+        (metadata_id, start.timestamp(), end.timestamp()),
+    ).fetchall()
+
+    samples: list[NumericSample] = []
+    for shared_attrs, ts in rows:
+        value = None
+        if shared_attrs is not None:
+            try:
+                value = float(json.loads(shared_attrs)["temperature"])
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                value = None
+        samples.append(NumericSample(at_local=_to_local(ts), value=value))
     return samples

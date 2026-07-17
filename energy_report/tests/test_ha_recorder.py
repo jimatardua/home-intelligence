@@ -8,13 +8,18 @@ directly, without needing a full HA installation.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from energy_report.ha_recorder import get_binary_sensor_intervals, get_numeric_sensor_samples
+from energy_report.ha_recorder import (
+    get_binary_sensor_intervals,
+    get_numeric_sensor_samples,
+    get_weather_temperature_samples,
+)
 
 TZ = ZoneInfo("America/Denver")
 
@@ -28,7 +33,10 @@ def conn():
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE states_meta (metadata_id INTEGER PRIMARY KEY, entity_id TEXT)")
     connection.execute(
-        "CREATE TABLE states (metadata_id INTEGER, state TEXT, last_updated_ts REAL)"
+        "CREATE TABLE states (metadata_id INTEGER, state TEXT, last_updated_ts REAL, attributes_id INTEGER)"
+    )
+    connection.execute(
+        "CREATE TABLE state_attributes (attributes_id INTEGER PRIMARY KEY, shared_attrs TEXT)"
     )
     yield connection
     connection.close()
@@ -40,7 +48,20 @@ def _add_entity(connection, metadata_id: int, entity_id: str) -> None:
 
 def _add_state(connection, metadata_id: int, state: str, at_local: datetime) -> None:
     connection.execute(
-        "INSERT INTO states VALUES (?, ?, ?)", (metadata_id, state, at_local.timestamp())
+        "INSERT INTO states (metadata_id, state, last_updated_ts) VALUES (?, ?, ?)",
+        (metadata_id, state, at_local.timestamp()),
+    )
+
+
+def _add_weather_state(
+    connection, metadata_id: int, at_local: datetime, attrs: dict, attributes_id: int
+) -> None:
+    connection.execute(
+        "INSERT INTO state_attributes VALUES (?, ?)", (attributes_id, json.dumps(attrs))
+    )
+    connection.execute(
+        "INSERT INTO states (metadata_id, state, last_updated_ts, attributes_id) VALUES (?, ?, ?, ?)",
+        (metadata_id, "sunny", at_local.timestamp(), attributes_id),
     )
 
 
@@ -110,3 +131,41 @@ def test_numeric_sensor_non_numeric_garbage_becomes_none(conn):
 
     samples = get_numeric_sensor_samples(conn, "sensor.jim_s_tesla_charger_power", _dt(12), _dt(16))
     assert samples[0].value is None
+
+
+def test_weather_temperature_reads_from_attributes_not_state(conn):
+    _add_entity(conn, 3, "weather.forecast_home")
+    _add_weather_state(conn, 3, _dt(13), {"temperature": 98.5, "temperature_unit": "°F"}, attributes_id=1)
+    _add_weather_state(conn, 3, _dt(14), {"temperature": 101.0, "temperature_unit": "°F"}, attributes_id=2)
+    conn.commit()
+
+    samples = get_weather_temperature_samples(conn, "weather.forecast_home", _dt(12), _dt(16))
+    assert [s.value for s in samples] == [98.5, 101.0]
+    assert samples[0].at_local == _dt(13)
+
+
+def test_weather_temperature_missing_attributes_row_becomes_none(conn):
+    _add_entity(conn, 3, "weather.forecast_home")
+    # A state row with no matching state_attributes row at all (attributes_id
+    # is NULL) -- must be a gap, not a crash or a fabricated 0.
+    _add_state(conn, 3, "sunny", _dt(13))
+    conn.commit()
+
+    samples = get_weather_temperature_samples(conn, "weather.forecast_home", _dt(12), _dt(16))
+    assert samples[0].value is None
+
+
+def test_weather_temperature_missing_key_becomes_none(conn):
+    _add_entity(conn, 3, "weather.forecast_home")
+    # A real attributes row exists, but it happens to have no "temperature"
+    # key -- also a gap, not a crash.
+    _add_weather_state(conn, 3, _dt(13), {"humidity": 40}, attributes_id=1)
+    conn.commit()
+
+    samples = get_weather_temperature_samples(conn, "weather.forecast_home", _dt(12), _dt(16))
+    assert samples[0].value is None
+
+
+def test_weather_temperature_unknown_entity_returns_no_samples(conn):
+    conn.commit()
+    assert get_weather_temperature_samples(conn, "weather.does_not_exist", _dt(9), _dt(15)) == []

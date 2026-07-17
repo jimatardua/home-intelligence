@@ -6,6 +6,17 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.6] - 2026-07-17
+
+- Add an "Outdoor temperature vs. usage" chart to the TOU report, comparing
+  daily average outdoor temperature (from `weather.forecast_home`'s
+  `temperature` attribute) against total daily usage and A/C-specific usage,
+  both in kWh (tooltip also shows the A/C bar's equivalent runtime hours).
+- New `get_weather_temperature_samples()` in `ha_recorder.py`, reading a
+  weather entity's `temperature` attribute via `state_attributes` (weather
+  entities store condition strings in their `state` column, not the
+  reading itself).
+
 ## [1.0.5] - 2026-07-16
 
 - Add a "Total" line to the usage breakdown chart's tooltip (sum of A/C, EV,

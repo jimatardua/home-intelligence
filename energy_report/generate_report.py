@@ -25,7 +25,12 @@ from pathlib import Path
 from .archive_loader import coverage_by_date, load_archive
 from .billing import compute_schedule1_cost, compute_tou_cost, total_cost
 from .disaggregation import disaggregate_hour
-from .ha_recorder import get_binary_sensor_intervals, get_numeric_sensor_samples, open_recorder_db
+from .ha_recorder import (
+    get_binary_sensor_intervals,
+    get_numeric_sensor_samples,
+    get_weather_temperature_samples,
+    open_recorder_db,
+)
 from .render import DailyBreakdown, LeverRow, ReportContext, render_report
 from .sensitivity import (
     billable_hours_from_disaggregation,
@@ -39,6 +44,7 @@ import datetime as dt_module
 AC_ENTITY = "binary_sensor.family_room_ac_running"
 EV_ENTITIES = {"jim": "sensor.jim_s_tesla_charger_power", "irina": "sensor.irina_s_tesla_charger_power"}
 EV_LABELS = {"jim": "Jim's Tesla", "irina": "Irina's Tesla"}
+WEATHER_ENTITY = "weather.forecast_home"
 
 DAYS_INSUFFICIENT = 14
 DAYS_SEASONAL = 60
@@ -88,6 +94,7 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
         car: get_numeric_sensor_samples(conn, entity, window_start, window_end)
         for car, entity in EV_ENTITIES.items()
     }
+    weather_samples = get_weather_temperature_samples(conn, WEATHER_ENTITY, window_start, window_end)
 
     hours = [
         disaggregate_hour(r.start_local, r.usage_kwh, ac_intervals, ev_samples) for r in readings
@@ -143,7 +150,8 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
         for r in build_sensitivity_table(hours, day_count, EV_LABELS)
     ]
 
-    daily_breakdown = _daily_breakdown(hours, coverage)
+    daily_temps = _daily_avg_temps(weather_samples)
+    daily_breakdown = _daily_breakdown(hours, coverage, daily_temps)
 
     return ReportContext(
         generated_at=generated_at,
@@ -165,7 +173,23 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
     )
 
 
-def _daily_breakdown(hours, coverage) -> list[DailyBreakdown]:
+def _daily_avg_temps(weather_samples) -> dict[date, float]:
+    """Mean outdoor temperature (°F) per local calendar date.
+
+    Unlike EV power, temperature isn't something to integrate over time --
+    a plain average of whatever readings exist that day is the right
+    aggregation. A day with zero real (non-gap) readings is simply absent
+    from the returned dict, so callers must treat a missing key as "no
+    data" rather than defaulting to 0.
+    """
+    by_date = defaultdict(list)
+    for s in weather_samples:
+        if s.value is not None:
+            by_date[s.at_local.date()].append(s.value)
+    return {d: sum(vals) / len(vals) for d, vals in by_date.items()}
+
+
+def _daily_breakdown(hours, coverage, daily_temps: dict[date, float]) -> list[DailyBreakdown]:
     by_date = defaultdict(list)
     for h in hours:
         by_date[h.hour_start.date()].append(h)
@@ -191,6 +215,7 @@ def _daily_breakdown(hours, coverage) -> list[DailyBreakdown]:
                 offpeak_kwh=offpeak_kwh,
                 hours_present=hours_present,
                 hours_expected=hours_expected,
+                avg_outdoor_temp_f=daily_temps.get(d),
             )
         )
     return result
