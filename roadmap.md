@@ -105,6 +105,18 @@ Energy
   Dashboard "Grid consumption" source, with a parallel raw-JSON archive on
   disk per architecture.md's "don't discard historical data" principle.
 - Emporia Vue
+- Physical outdoor weather sensor (e.g. Eve Weather, Matter-over-Thread) --
+  the TOU report's outdoor-temperature chart currently reads
+  `weather.forecast_home` (HA's built-in Met.no integration), which is a
+  pure forecast-model value, not a real observation -- confirmed via its
+  config entry (domain `met`) and Met.no's own API design (no ground
+  station feed). A dedicated outdoor sensor would be a genuine measurement
+  at the house itself, rather than a model estimate or NWS's nearest-
+  station reading. Blocked on Thread border router placement -- domus
+  currently has none (an HA integration entry that looked like a candidate
+  turned out to just be Companion-protocol control of a Mac, not real
+  Thread hardware) -- planned to be resolved once domus is relocated to
+  the family room (see hardware.md).
 - ~~Energy Dashboard~~ (partial, ahead of schedule) — built an "Energy &
   Comfort" HA dashboard using the two biggest known consumers we can
   already observe without Emporia Vue: HVAC and Tesla charging. Required

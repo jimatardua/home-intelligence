@@ -94,11 +94,29 @@ the conservative, correct behavior -- not a bug.
 temperature against total usage and A/C-specific usage (both in kWh, on the
 same axis -- A/C runtime hours is shown as a tooltip aside rather than a
 third chart axis, since it's a fixed multiple of A/C kWh under the constant-
-draw model). Temperature comes from `weather.forecast_home`'s `temperature`
+draw model). Temperature reads from a weather entity's `temperature`
 attribute -- weather entities store a condition string ("sunny") in their
 own `state` column, not the reading itself, so this reads
 `state_attributes` directly rather than the plain `state` column the other
 numeric sensors use.
+
+The weather entity itself is HA's built-in **NWS** (National Weather
+Service) integration (`weather.nws_..._kslc`, station KSLC), not the
+`met` (Met.no) integration initially investigated -- Met.no is a pure
+forecast-model value with no ground station feed (confirmed via its config
+entry and API design), while NWS's "current conditions" pulls a real
+METAR/ASOS station observation (visible in its own attributes, e.g. a
+`visibility` field Met.no doesn't report). NWS's config flow validates
+the station live against the real NWS API rather than being purely
+offline-configurable, so setting it up means either the HA UI
+(Settings -> Devices & Services -> Add Integration) or replicating that
+same validation call directly (`pynws.SimpleNWS.set_station()`) before
+constructing the config entry by hand -- the latter is what was actually
+done here, confirmed against a live `ha core check`-equivalent restart with
+no errors and a real station observation landing in the recorder DB.
+Historical temperature data only exists from whenever NWS was actually set
+up forward -- earlier report dates will show a temperature gap, same
+gap-aware handling as everywhere else in this report.
 
 **Billing-month tiering** approximates with calendar-month boundaries
 (`BILLING_CYCLE_START_DAY`), stated explicitly in the report rather than

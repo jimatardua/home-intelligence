@@ -6,6 +6,17 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.7] - 2026-07-17
+
+- Add and configure HA's built-in NWS (National Weather Service) integration
+  on domus (station KSLC), and switch the TOU report's outdoor-temperature
+  chart to read from it instead of Met.no -- NWS reports a real METAR/ASOS
+  ground-station observation for "current conditions," while Met.no is a
+  pure forecast-model value with no station feed.
+- Documented a planned domus relocation (basement -> family room) in
+  hardware.md, and a physical outdoor weather sensor (e.g. Eve Weather) in
+  roadmap.md Phase 3, both blocked on Thread border router availability.
+
 ## [1.0.6] - 2026-07-17
 
 - Add an "Outdoor temperature vs. usage" chart to the TOU report, comparing

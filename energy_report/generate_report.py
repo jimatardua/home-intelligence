@@ -44,7 +44,12 @@ import datetime as dt_module
 AC_ENTITY = "binary_sensor.family_room_ac_running"
 EV_ENTITIES = {"jim": "sensor.jim_s_tesla_charger_power", "irina": "sensor.irina_s_tesla_charger_power"}
 EV_LABELS = {"jim": "Jim's Tesla", "irina": "Irina's Tesla"}
-WEATHER_ENTITY = "weather.forecast_home"
+# NWS (National Weather Service) reports real METAR/ASOS station
+# observations for "current conditions" -- weather.forecast_home (Met.no)
+# is a pure forecast-model value with no ground station feed. Switched once
+# NWS was added; historical data only exists from whenever NWS was set up
+# forward, so early reports will show gaps for dates before that.
+WEATHER_ENTITY = "weather.nws_40_73657574787062_111_81042551994325_kslc"
 
 DAYS_INSUFFICIENT = 14
 DAYS_SEASONAL = 60
