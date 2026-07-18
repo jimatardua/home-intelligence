@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 import json
 
+from .archive_loader import LOCAL_TZ
 from .disaggregation import AC_ESTIMATED_KW
 
 # Pinned exactly to match the reference bandwidth dashboards -- same CDN
@@ -145,7 +146,11 @@ def _chart_series(daily: list[DailyBreakdown]) -> dict:
 
 
 def render_report(ctx: ReportContext) -> str:
-    data_as_of_str = ctx.data_as_of.strftime("%Y-%m-%d %H:%M %Z") if ctx.data_as_of else "no data yet"
+    data_as_of_str = (
+        ctx.data_as_of.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M %Z")
+        if ctx.data_as_of
+        else "no data yet"
+    )
     date_range_str = (
         f"{ctx.date_range_start.isoformat()} to {ctx.date_range_end.isoformat()}"
         if ctx.date_range_start and ctx.date_range_end

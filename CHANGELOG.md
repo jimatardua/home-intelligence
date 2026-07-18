@@ -6,6 +6,13 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.8] - 2026-07-18
+
+- Fix the "Data as of" header timestamp showing UTC instead of local time
+  -- it's derived from the archive's `fetched_at` field (stored in UTC) and
+  was never converted before display, unlike the footer's "Generated"
+  timestamp which already used local time correctly.
+
 ## [1.0.7] - 2026-07-17
 
 - Add and configure HA's built-in NWS (National Weather Service) integration
