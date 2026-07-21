@@ -84,9 +84,14 @@ RMP's actual meter reading to know.
 
 ## File layout
 
-- `forecast.py` -- NWS forecast API client (plain `requests`); each period
-  also carries NWS's own condition icon URL, used directly in the forecast
-  strip rather than building a custom condition-to-icon mapping
+- `forecast.py` -- NWS forecast API client (plain `requests`); each period's
+  NWS icon URL is mapped to a local icon category via `weather_icons.py`
+  before it ever reaches `render.py`
+- `weather_icons.py` -- maps NWS's forecast-icon condition codes (`skc`,
+  `bkn`, `tsra`, ...) to one of the 14 locally vendored icon categories;
+  pure function, no I/O, easy to test against NWS's real vocabulary directly
+- `icons.py` + `icons/*.svg` -- the vendored icon set itself (Meteocons,
+  flat style, MIT licensed -- see "Icon source" below)
 - `sun_times.py` -- independent sunrise/sunset via `astral` 1.x
 - `usage_today.py` -- "since local midnight" A/C+EV estimate, reusing
   `energy_report.ha_recorder`'s `get_binary_sensor_intervals()`/
@@ -139,8 +144,80 @@ missing data, never fabricated) as every other reader in that module.
   percentage sensor -- no new data-fetching pattern needed).
 - Added NWS's own per-period condition icons to the forecast strip, via
   plain `<img>` tags pointing at NWS's icon URLs -- no local icon set or
-  condition-to-icon mapping to build or maintain.
+  condition-to-icon mapping to build or maintain. **Superseded** by the
+  vendored icon set below after a second round of feedback asked for a
+  cleaner icon style.
 - Added the 12-hour outdoor temperature sparkline described above.
+
+### Icon source: NWS hotlinked -> Meteocons vendored locally
+
+Second-round feedback asked for cleaner-looking forecast icons (pointing at
+Apple's Weather app as a style reference) and for x/y axis labels on the
+sparkline. The icon request needed a real licensing check first: Apple's
+own icon artwork on `support.apple.com` is proprietary and not reusable.
+Landed on [Meteocons](https://meteocons.com) (`basmilius/meteocons` on
+GitHub) instead -- confirmed MIT licensed via the repo's actual `LICENSE`
+file, 500+ icons across 4 styles (fill, flat, line, monochrome). Showed the
+user a side-by-side comparison of all 4 styles; **flat** was the pick.
+
+- **Vendored, not hotlinked or CDN-loaded.** The 14 icon categories this
+  house's forecasts actually need are downloaded once and stored as
+  `<symbol>` fragments under `icons/*.svg` (each ~0.3-9KB, ~72KB total).
+  Same "the page must be self-contained" reasoning as the NoSleep video:
+  an always-on kiosk display shouldn't have a per-refresh dependency on
+  NWS's icon server (which is itself marked deprecated,
+  see below) or a third-party CDN.
+- **One sprite, baked into `index.html` once.** All 14 `<symbol>`s are
+  concatenated into a single hidden `<svg>` block, embedded by `render_html()`
+  at first load. The forecast strip then references icons by id
+  (`<use href="#icon-clear-day">`); `data.json`'s 60-second refresh only ever
+  carries the small category string, not repeated SVG markup -- consistent
+  with keeping that polling payload lightweight.
+- **NWS's icon condition codes are mapped locally, per NWS's own advice.**
+  NWS's `/icons` endpoint is marked deprecated (though still functional, no
+  removal timeline --
+  [weather-gov/api#557](https://github.com/weather-gov/api/discussions/557)),
+  and NWS's own recommended long-term approach is "map icon codes to custom
+  graphics locally." `weather_icons.py` does exactly that: classifies each
+  condition segment in the URL by substring match (rather than exact
+  lookup -- see the real bug this avoided, below), then keeps the most
+  severe classification when a period packs multiple segments together
+  (e.g. `bkn/tsra_hi,40` -- cloudy early in the period, thunderstorms
+  later), always returning a valid icon rather than raising on an
+  unrecognized code. An approximate icon is harmless in a way a fabricated
+  sensor reading would not be, and NWS's condition vocabulary isn't a
+  fixed, versioned contract.
+- **NWS's documented vocabulary doesn't match what the live API actually
+  returns.** [weather.gov/forecast-icons](https://www.weather.gov/forecast-icons)
+  lists `hi_tsra` and `scttsra` for thunderstorm variants; real forecast
+  responses captured live during development used `tsra_hi` and
+  `tsra_sct` instead (modifier and base swapped). An exact-match mapping
+  built against the documented codes silently classified every real
+  thunderstorm period as plain "cloudy." Fixed by classifying each code by
+  substring (`"tsra" in code`) instead of exact equality -- catches either
+  ordering, and any other NWS combines-with-an-underscore variant, without
+  needing to enumerate every real-world permutation by hand.
+- **A related parsing bug surfaced while fixing that:** the live URL shape
+  is `.../icons/land/day/skc`, and the `icons` path segment isn't a
+  condition code -- an earlier version that classified every segment after
+  `land`/`day`/`night` (rather than anchoring on the `day`/`night` marker
+  itself) picked up `icons` as a spurious extra classification, which fell
+  back to the default "cloudy" category and then *outranked* the real
+  "clear" classification in the severity ranking. Fixed by anchoring on
+  the `day`/`night` marker's index and treating everything after it as
+  condition codes, regardless of how many fixed segments precede it.
+- Some categories (`cloudy`, `rain`, `snow`, `sleet`, `drizzle`, `fog`,
+  `smoke`, `wind`) have no day/night variant in Meteocons' set (confirmed
+  via HTTP HEAD checks -- `rain-night` 404s, for example); only `clear`,
+  `partly-cloudy`, and `thunderstorms` do.
+
+### Sparkline axis labels
+
+Added a gridline + label at the min and max temperature (y-axis) and a
+time label at the start, middle, and end of the window (x-axis), computed
+client-side in `drawSparkline()` from the actual `data.json` history array
+-- not hardcoded to a 12-hour assumption, so it still labels correctly if
+the window has less data than that (e.g. shortly after a restart).
 
 ## Known risks / things to watch
 
@@ -155,24 +232,29 @@ missing data, never fabricated) as every other reader in that module.
   iPad** -- the video itself is confirmed to load/decode correctly, but
   whether it actually prevents iPadOS 15.8's screen from sleeping can only
   be confirmed on the physical device.
-- **Forecast icons are hotlinked from `api.weather.gov`** -- if NWS's icon
-  server is ever slow/unreachable, those specific images just fail to load
-  (broken image icon), it doesn't take down the rest of the page, but it's
-  an external per-period dependency worth knowing about.
+- **NWS's condition-code vocabulary isn't a versioned contract.** If NWS
+  ever adds a new code `weather_icons.py` doesn't recognize, it falls back
+  to `DEFAULT_ICON_CATEGORY` ("cloudy") rather than crashing -- worth
+  occasionally diffing against
+  [weather.gov/forecast-icons](https://www.weather.gov/forecast-icons) if a
+  forecast period's icon looks obviously wrong.
 - **NWS's forecast endpoint is grid-point-specific**
   (`gridpoints/SLC/103,174/forecast`), hardcoded for the house's current
   location -- would need updating if the reference point ever changes.
 
 ## Status
 
-- [x] `forecast.py` (+ icon URLs)
+- [x] `forecast.py` (+ icon categories via `weather_icons.py`)
 - [x] `sun_times.py`
 - [x] `usage_today.py`
 - [x] `temp_history.py`
-- [x] `render.py` (layout swap, battery, icons, sparkline, video fallback)
+- [x] `render.py` (layout swap, battery, icons, sparkline + axis labels,
+      video fallback)
 - [x] `generate_dashboard.py`
-- [x] Unit tests (23 passing, plus 6 shared-reader tests in
-      `energy_report`'s own suite -- 85 total across both packages)
+- [x] `weather_icons.py` + vendored `icons/*.svg` (Meteocons, flat style,
+      MIT licensed, replacing the original NWS-hotlinked `<img>` icons)
+- [x] Unit tests (39 passing in `home_dashboard`, 62 in `energy_report` --
+      101 total across both packages)
 - [x] `deploy.sh`
 - [x] Deployed to domus and verified end-to-end (cron entry live, nginx
       location added, `ha-proxy` container recreated with the new bind

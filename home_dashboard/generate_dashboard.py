@@ -65,7 +65,7 @@ def _load_previous_forecast(output_dir: Path) -> list[ForecastPeriodView]:
                 temperature_f=p["temperature_f"],
                 short_forecast=p["short_forecast"],
                 precip_probability_pct=p["precip_probability_pct"],
-                icon_url=p.get("icon_url"),
+                icon_category=p.get("icon_category"),
             )
             for p in previous.get("forecast", [])
         ]
@@ -95,7 +95,7 @@ def _build_context(db_path: Path, output_dir: Path) -> DashboardContext:
                 temperature_f=p.temperature_f,
                 short_forecast=p.short_forecast,
                 precip_probability_pct=p.precip_probability_pct,
-                icon_url=p.icon_url,
+                icon_category=p.icon_category,
             )
             for p in get_forecast_periods()
         ]

@@ -56,7 +56,7 @@ def test_get_forecast_periods_parses_real_shape():
     assert periods[1].is_daytime is False
 
 
-def test_icon_url_extracted_when_present():
+def test_icon_url_mapped_to_local_category_when_present():
     body = {
         "properties": {
             "periods": [
@@ -72,7 +72,7 @@ def test_icon_url_extracted_when_present():
     }
     with patch("home_dashboard.forecast.requests.get", return_value=_mock_response(body)):
         [period] = get_forecast_periods()
-    assert period.icon_url == "https://api.weather.gov/icons/land/day/skc?size=medium"
+    assert period.icon_category == "clear-day"
 
 
 def test_missing_icon_field_becomes_none_not_a_crash():
@@ -85,7 +85,7 @@ def test_missing_icon_field_becomes_none_not_a_crash():
     }
     with patch("home_dashboard.forecast.requests.get", return_value=_mock_response(body)):
         [period] = get_forecast_periods()
-    assert period.icon_url is None
+    assert period.icon_category is None
 
 
 def test_get_forecast_periods_respects_limit():

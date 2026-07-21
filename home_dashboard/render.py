@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 
+from home_dashboard.icons import load_icon_sprite
+
 # A minimal (1.7KB) silent, black, 2x2px, 2-second H.264 video, base64-encoded
 # -- the classic NoSleep.js-style keep-awake trick for iOS versions older
 # than the Wake Lock API (iPadOS < 16.4). Generated once via:
@@ -35,7 +37,7 @@ class ForecastPeriodView:
     temperature_f: int
     short_forecast: str
     precip_probability_pct: int
-    icon_url: str | None = None
+    icon_category: str | None = None  # e.g. "partly-cloudy-day" -- see weather_icons.py
 
 
 @dataclass(frozen=True)
@@ -141,7 +143,7 @@ def _data_dict(ctx: DashboardContext) -> dict:
                 "temperature_f": p.temperature_f,
                 "short_forecast": p.short_forecast,
                 "precip_probability_pct": p.precip_probability_pct,
-                "icon_url": p.icon_url,
+                "icon_category": p.icon_category,
             }
             for p in ctx.forecast_periods
         ],
@@ -187,7 +189,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .forecast{{background:var(--card);border-radius:var(--r);padding:2vh 2vw;display:flex;justify-content:space-between;gap:8px}}
 .period{{flex:1;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px}}
 .period .name{{font-size:min(2.2vw,15px);color:var(--muted);text-transform:uppercase;letter-spacing:.5px}}
-.period img.icon{{width:min(8vw,48px);height:min(8vw,48px)}}
+.period svg.icon{{width:min(8vw,48px);height:min(8vw,48px)}}
 .period .temp{{font-size:min(4vw,32px);font-weight:700}}
 .period .cond{{font-size:min(2vw,13px);color:var(--muted)}}
 .period .rain{{font-size:min(2vw,13px);color:var(--accent);font-weight:600}}
@@ -195,6 +197,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 </style>
 </head>
 <body>
+
+{load_icon_sprite()}
 
 <div class="hero">
   <div class="outdoor">
@@ -252,20 +256,45 @@ function drawSparkline(history) {{
     label.textContent = 'Outdoor temp -- last 12h (not enough data yet)';
     return;
   }}
-  const width = 600, height = 100, pad = 6;
+  const width = 600, height = 100;
+  const padLeft = 34, padRight = 6, padTop = 10, padBottom = 18;
+  const plotW = width - padLeft - padRight;
+  const plotH = height - padTop - padBottom;
   const times = history.map(p => new Date(p.t).getTime());
   const temps = history.map(p => p.v);
   const minT = Math.min(...times), maxT = Math.max(...times);
   const minV = Math.min(...temps), maxV = Math.max(...temps);
   const spanT = (maxT - minT) || 1;
   const spanV = (maxV - minV) || 1;
-  const points = history.map(p => {{
-    const x = pad + (width - 2 * pad) * ((new Date(p.t).getTime() - minT) / spanT);
-    const y = height - pad - (height - 2 * pad) * ((p.v - minV) / spanV);
-    return x.toFixed(1) + ',' + y.toFixed(1);
-  }}).join(' ');
-  svg.innerHTML = `<polyline points="${{points}}" fill="none" stroke="#4da3ff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
-  label.textContent = 'Outdoor temp -- last 12h (' + Math.round(minV) + '°-' + Math.round(maxV) + '°)';
+  const xFor = t => padLeft + plotW * ((t - minT) / spanT);
+  const yFor = v => padTop + plotH - plotH * ((v - minV) / spanV);
+  const timeFmt = t => new Date(t).toLocaleTimeString([], {{hour: 'numeric', minute: '2-digit'}});
+
+  const points = history
+    .map(p => xFor(new Date(p.t).getTime()).toFixed(1) + ',' + yFor(p.v).toFixed(1))
+    .join(' ');
+
+  let svgHtml = `<polyline points="${{points}}" fill="none" stroke="#4da3ff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
+
+  // y-axis: a gridline + label at the min and max temperature.
+  [minV, maxV].forEach(v => {{
+    const y = yFor(v).toFixed(1);
+    svgHtml += `<line x1="${{padLeft}}" y1="${{y}}" x2="${{width - padRight}}" y2="${{y}}" stroke="#2a2f3a" stroke-width="1"/>`;
+    svgHtml += `<text x="${{padLeft - 6}}" y="${{y}}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="#8b93a7">${{Math.round(v)}}°</text>`;
+  }});
+
+  // x-axis: a time label at the start, middle, and end of the window.
+  [
+    [minT, 'start'],
+    [(minT + maxT) / 2, 'middle'],
+    [maxT, 'end'],
+  ].forEach(([t, anchor]) => {{
+    const x = xFor(t).toFixed(1);
+    svgHtml += `<text x="${{x}}" y="${{height - 4}}" text-anchor="${{anchor}}" font-size="11" fill="#8b93a7">${{timeFmt(t)}}</text>`;
+  }});
+
+  svg.innerHTML = svgHtml;
+  label.textContent = 'Outdoor temp -- last 12h';
 }}
 
 function applyData(d) {{
@@ -289,7 +318,7 @@ function applyData(d) {{
     const div = document.createElement('div');
     div.className = 'period';
     const rainHtml = p.precip_probability_pct > 0 ? `<div class="rain">${{p.precip_probability_pct}}% rain</div>` : '';
-    const iconHtml = p.icon_url ? `<img class="icon" src="${{p.icon_url}}" alt="">` : '';
+    const iconHtml = p.icon_category ? `<svg class="icon"><use href="#icon-${{p.icon_category}}"></use></svg>` : '';
     div.innerHTML = `<div class="name">${{p.name}}</div>${{iconHtml}}<div class="temp">${{p.temperature_f}}°</div><div class="cond">${{p.short_forecast}}</div>${{rainHtml}}`;
     forecastEl.appendChild(div);
   }});

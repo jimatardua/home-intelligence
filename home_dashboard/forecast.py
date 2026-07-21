@@ -16,6 +16,8 @@ from dataclasses import dataclass
 
 import requests
 
+from home_dashboard.weather_icons import icon_category_for_nws_icon_url
+
 CONTACT = "comanche@ardua.com"
 USER_AGENT = f"{CONTACT} home-dashboard"
 FORECAST_URL = "https://api.weather.gov/gridpoints/SLC/103,174/forecast"
@@ -35,19 +37,20 @@ class ForecastPeriod:
     temperature_f: int  # that period's high (daytime) or low (nighttime)
     short_forecast: str
     precip_probability_pct: int  # 0 if NWS reports none for this period
-    icon_url: str | None  # NWS's own condition icon, e.g. ".../icons/land/day/bkn/tsra_hi,40"
+    icon_category: str | None  # local icon category, e.g. "partly-cloudy-day" -- see weather_icons.py
 
 
 def _parse_period(raw: dict) -> ForecastPeriod:
     try:
         precip = raw.get("probabilityOfPrecipitation") or {}
+        icon_url = raw.get("icon")
         return ForecastPeriod(
             name=raw["name"],
             is_daytime=raw["isDaytime"],
             temperature_f=int(raw["temperature"]),
             short_forecast=raw["shortForecast"],
             precip_probability_pct=int(precip.get("value") or 0),
-            icon_url=raw.get("icon"),
+            icon_category=icon_category_for_nws_icon_url(icon_url) if icon_url else None,
         )
     except (KeyError, TypeError, ValueError) as err:
         raise ForecastError(f"Unexpected NWS forecast period shape: {raw}") from err

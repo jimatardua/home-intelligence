@@ -6,6 +6,28 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.12] - 2026-07-21
+
+- Replace the home dashboard's NWS-hotlinked forecast icons with a locally
+  vendored set (Meteocons, flat style, MIT licensed) -- confirmed usable
+  after the user pointed at meteocons.com and picked "flat" from a 4-style
+  comparison. Icons are embedded once as an SVG `<symbol>` sprite in
+  `index.html`; the forecast strip references them by id, so the 60-second
+  `data.json` refresh only ever carries a small category string.
+- Added `home_dashboard/weather_icons.py` to map NWS's forecast-icon
+  condition codes to the vendored icon set, per NWS's own recommendation
+  for their deprecated `/icons` endpoint ("map codes to custom graphics
+  locally"). Found and fixed two real bugs while wiring this up against
+  live data: NWS's actual API returns condition-code orderings
+  (`tsra_sct`, `tsra_hi`) that don't match its own documented vocabulary
+  (`scttsra`, `hi_tsra`), and a URL-parsing bug where the `icons` path
+  segment was being classified as a spurious condition code, silently
+  outranking real "clear"/"partly-cloudy" results in the severity ranking.
+  Both were silently turning every non-cloudy forecast period into
+  "cloudy" until caught by comparing against real NWS API responses.
+- Added x/y axis labels (time and temperature) to the 12-hour outdoor
+  temperature sparkline, per user feedback.
+
 ## [1.0.11] - 2026-07-21
 
 - Home dashboard visual updates based on real usage feedback: swapped the
