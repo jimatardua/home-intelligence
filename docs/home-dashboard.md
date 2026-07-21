@@ -255,7 +255,12 @@ both in a smaller font than the old combined value). Needed two new
 vendored icons -- Meteocons' `sunrise`/`sunset` (flat style, same MIT
 source as the rest of the set) -- with the same horizon-line recolor
 (`#202939` -> `#8b93a7`) already applied to keep it visible on the dark
-background.
+background. Dropped the card's "Sun" label entirely -- the icons make it
+obvious by context. At the icons' original size (`min(7vw,40px)`, matching
+the forecast strip), the only visual difference between sunrise and
+sunset -- a small up/down notch in the horizon line -- was too subtle to
+read at a glance, so they're sized up to `min(11vw,64px)` now that the
+label's removal freed up room in the card.
 
 **A real, previously-latent bug surfaced while adding these**: Meteocons'
 `sunrise`/`sunset` artwork crops the sun to "peeking above/below the

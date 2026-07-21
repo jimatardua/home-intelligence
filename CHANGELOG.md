@@ -6,6 +6,13 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.16] - 2026-07-21
+
+- Sun card: dropped the redundant "Sun" label and enlarged the sunrise/
+  sunset icons (`min(7vw,40px)` -> `min(11vw,64px)`) -- at the old size the
+  only visual difference between the two (a small up/down notch in the
+  horizon line) was too subtle to read at a glance.
+
 ## [1.0.15] - 2026-07-21
 
 - Home dashboard layout tweaks: more top margin, outdoor temperature moved

@@ -266,7 +266,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .card .sub{{font-size:min(2.2vw,15px);color:var(--muted);margin-top:6px}}
 .sun-row{{display:flex;justify-content:space-around;align-items:center}}
 .sun-item{{display:flex;flex-direction:column;align-items:center;gap:4px}}
-.sun-item svg.icon{{width:min(7vw,40px);height:min(7vw,40px)}}
+.sun-item svg.icon{{width:min(11vw,64px);height:min(11vw,64px)}}
 .sun-item .sun-time{{font-size:min(2.4vw,17px);font-weight:700}}
 .sparkline-card{{background:var(--card);border-radius:var(--r);padding:1.5vh 2vw}}
 .sparkline-card .label{{font-size:min(2vw,13px);color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px}}
@@ -314,7 +314,6 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     <div class="sub" id="thermostat-sub"></div>
   </div>
   <div class="card">
-    <div class="label">Sun</div>
     <div class="sun-row">
       <div class="sun-item">
         <svg class="icon"><use href="#icon-sunrise"></use></svg>
