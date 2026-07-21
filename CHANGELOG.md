@@ -6,6 +6,14 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.13] - 2026-07-21
+
+- Fill the empty space between the outdoor temp and the clock with chance
+  of rain and outdoor humidity, sized to match the clock's font. Both
+  reuse data already present in `data.json` (outdoor humidity, and the
+  first forecast period's precipitation probability as "now") -- no new
+  backend fields needed.
+
 ## [1.0.12] - 2026-07-21
 
 - Replace the home dashboard's NWS-hotlinked forecast icons with a locally

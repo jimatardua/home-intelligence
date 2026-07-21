@@ -211,6 +211,19 @@ user a side-by-side comparison of all 4 styles; **flat** was the pick.
   via HTTP HEAD checks -- `rain-night` 404s, for example); only `clear`,
   `partly-cloudy`, and `thunderstorms` do.
 
+### Chance of rain and humidity in the hero row
+
+There was a lot of unused space between the outdoor temp block and the
+clock once the layout got swapped around. Filled it with chance of rain
+and outdoor humidity, sized to match the clock's own font size so it
+reads as part of the same hero row rather than a smaller secondary detail.
+Neither needed a new data source: humidity was already in `data.json`
+(`outdoor_humidity_pct`, from the same Eve Weather sensor as the
+temperature) but never rendered anywhere; chance of rain reuses the first
+forecast period's `precip_probability_pct` (`d.forecast[0]`) -- that
+period already represents "now" (it's "Today" during the day, "Tonight"
+after dark), so no new backend field was needed for it either.
+
 ### Sparkline axis labels
 
 Added a gridline + label at the min and max temperature (y-axis) and a

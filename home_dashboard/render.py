@@ -175,6 +175,10 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .outdoor .temp{{font-size:min(10vw,90px);font-weight:800;line-height:1}}
 .outdoor .condition{{font-size:min(3vw,22px);color:var(--muted)}}
 .outdoor .battery{{font-size:min(2vw,14px);color:var(--muted);margin-top:2px}}
+.hero-stats{{display:flex;gap:6vw}}
+.hero-stats .stat{{text-align:center}}
+.hero-stats .stat-value{{font-size:min(5.6vw,48px);font-weight:800;line-height:1}}
+.hero-stats .stat-label{{font-size:min(2vw,16px);color:var(--muted);margin-top:2px}}
 .clock-block{{text-align:right}}
 .clock{{font-size:min(5.6vw,48px);font-weight:800;line-height:1;letter-spacing:-1px}}
 .date{{font-size:min(2vw,16px);color:var(--muted);margin-top:2px}}
@@ -205,6 +209,16 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     <div class="temp" id="outdoor-temp">--</div>
     <div class="condition" id="outdoor-condition"></div>
     <div class="battery" id="battery"></div>
+  </div>
+  <div class="hero-stats">
+    <div class="stat">
+      <div class="stat-value" id="rain-chance">--</div>
+      <div class="stat-label">Chance of rain</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="humidity">--</div>
+      <div class="stat-label">Humidity</div>
+    </div>
   </div>
   <div class="clock-block">
     <div class="clock" id="clock">--:--</div>
@@ -301,6 +315,10 @@ function applyData(d) {{
   document.getElementById('outdoor-temp').textContent = d.outdoor_temp_f != null ? Math.round(d.outdoor_temp_f) + '°' : '--';
   document.getElementById('outdoor-condition').textContent = d.condition || '';
   document.getElementById('battery').textContent = d.outdoor_battery_pct != null ? '🔋 ' + Math.round(d.outdoor_battery_pct) + '%' : '';
+
+  const currentPeriod = d.forecast && d.forecast[0];
+  document.getElementById('rain-chance').textContent = currentPeriod ? currentPeriod.precip_probability_pct + '%' : '--';
+  document.getElementById('humidity').textContent = d.outdoor_humidity_pct != null ? Math.round(d.outdoor_humidity_pct) + '%' : '--';
 
   document.getElementById('indoor-temp').textContent = d.indoor_temp_f != null ? Math.round(d.indoor_temp_f) + '°' : '--';
   const hvac = d.hvac_action && d.hvac_action !== 'off' ? d.hvac_action : (d.hvac_mode || 'off');
