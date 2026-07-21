@@ -6,6 +6,21 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.10] - 2026-07-21
+
+- Add `home_dashboard/`, a cron-generated home dashboard replacing an aging
+  iPad's Carrot Weather app: Eve Weather outdoor temp, Nest indoor temp/
+  setpoint, NWS forecast highs/lows and rain timing, sunrise/sunset, a live
+  clock, and an A/C+EV usage-today estimate. Deployed live at
+  `/dashboard/`. See `docs/home-dashboard.md` for the full writeup,
+  including two real surprises hit along the way: `sun.sun`'s attributes
+  are never persisted to HA's recorder DB, and domus's apt-installed
+  `astral` is a much older major version with a completely different API
+  than initially developed against.
+- Added `get_latest_state()` and `get_latest_attributes()` to
+  `energy_report/ha_recorder.py` -- small, generic reads shared by both
+  packages now that `home_dashboard` imports `energy_report` as a sibling.
+
 ## [1.0.9] - 2026-07-21
 
 - Switch the TOU report's outdoor-temperature source from NWS (nearest

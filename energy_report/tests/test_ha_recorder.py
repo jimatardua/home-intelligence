@@ -17,6 +17,8 @@ import pytest
 
 from energy_report.ha_recorder import (
     get_binary_sensor_intervals,
+    get_latest_attributes,
+    get_latest_state,
     get_numeric_sensor_samples,
     get_weather_temperature_samples,
 )
@@ -169,3 +171,49 @@ def test_weather_temperature_missing_key_becomes_none(conn):
 def test_weather_temperature_unknown_entity_returns_no_samples(conn):
     conn.commit()
     assert get_weather_temperature_samples(conn, "weather.does_not_exist", _dt(9), _dt(15)) == []
+
+
+def test_get_latest_state_returns_most_recent(conn):
+    _add_entity(conn, 4, "climate.family_room_family_room")
+    _add_state(conn, 4, "off", _dt(10))
+    _add_state(conn, 4, "cool", _dt(12))
+    conn.commit()
+
+    assert get_latest_state(conn, "climate.family_room_family_room") == "cool"
+
+
+def test_get_latest_state_gap_becomes_none(conn):
+    _add_entity(conn, 4, "climate.family_room_family_room")
+    _add_state(conn, 4, "cool", _dt(10))
+    _add_state(conn, 4, "unavailable", _dt(12))
+    conn.commit()
+
+    assert get_latest_state(conn, "climate.family_room_family_room") is None
+
+
+def test_get_latest_state_unknown_entity_returns_none(conn):
+    conn.commit()
+    assert get_latest_state(conn, "climate.does_not_exist") is None
+
+
+def test_get_latest_attributes_returns_most_recent(conn):
+    _add_entity(conn, 4, "climate.family_room_family_room")
+    _add_weather_state(conn, 4, _dt(10), {"current_temperature": 75}, attributes_id=1)
+    _add_weather_state(conn, 4, _dt(12), {"current_temperature": 76, "temperature": 77}, attributes_id=2)
+    conn.commit()
+
+    attrs = get_latest_attributes(conn, "climate.family_room_family_room")
+    assert attrs == {"current_temperature": 76, "temperature": 77}
+
+
+def test_get_latest_attributes_no_attributes_row_returns_empty_dict(conn):
+    _add_entity(conn, 4, "climate.family_room_family_room")
+    _add_state(conn, 4, "cool", _dt(10))
+    conn.commit()
+
+    assert get_latest_attributes(conn, "climate.family_room_family_room") == {}
+
+
+def test_get_latest_attributes_unknown_entity_returns_empty_dict(conn):
+    conn.commit()
+    assert get_latest_attributes(conn, "climate.does_not_exist") == {}

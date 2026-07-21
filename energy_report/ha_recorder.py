@@ -171,3 +171,50 @@ def get_weather_temperature_samples(
                 value = None
         samples.append(NumericSample(at_local=_to_local(ts), value=value))
     return samples
+
+
+def get_latest_state(conn: sqlite3.Connection, entity_id: str) -> str | None:
+    """The most recent raw state string for any entity, or None.
+
+    None means either the entity has no recorded state at all, or its most
+    recent state is a gap marker (unknown/unavailable) -- same convention
+    as the rest of this module, never a fabricated value.
+    """
+    metadata_id = _metadata_id(conn, entity_id)
+    if metadata_id is None:
+        return None
+    row = conn.execute(
+        "SELECT state FROM states WHERE metadata_id = ? ORDER BY last_updated_ts DESC LIMIT 1",
+        (metadata_id,),
+    ).fetchone()
+    if row is None or row[0].lower() in _GAP_STATES:
+        return None
+    return row[0]
+
+
+def get_latest_attributes(conn: sqlite3.Connection, entity_id: str) -> dict:
+    """The most recent full attributes dict for any entity, or {}.
+
+    Empty dict means the entity has no recorded state, no attributes row,
+    or unparseable JSON -- callers should treat missing keys as gaps, same
+    convention as the rest of this module.
+    """
+    metadata_id = _metadata_id(conn, entity_id)
+    if metadata_id is None:
+        return {}
+    row = conn.execute(
+        """
+        SELECT sa.shared_attrs
+        FROM states s
+        LEFT JOIN state_attributes sa ON s.attributes_id = sa.attributes_id
+        WHERE s.metadata_id = ?
+        ORDER BY s.last_updated_ts DESC LIMIT 1
+        """,
+        (metadata_id,),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return {}
+    try:
+        return json.loads(row[0])
+    except json.JSONDecodeError:
+        return {}
