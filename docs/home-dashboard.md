@@ -63,16 +63,30 @@ RMP's actual meter reading to know.
   (`navigator.wakeLock.request('screen')`) on load and again on
   `visibilitychange` (Safari can silently release the lock when the tab is
   backgrounded, e.g. the iPad briefly locks, and doesn't restore it on its
-  own). Needs Safari/iPadOS 16.4+; given the iPad is described as
-  "ancient," its actual OS version should be checked before assuming this
-  works -- an older fallback (a silent looping video, which iOS
-  historically respects as a keep-awake signal) exists but was
-  deliberately not built preemptively, only if the version check actually
-  shows it's needed.
+  own). Needs Safari/iPadOS 16.4+ -- **confirmed this iPad (an Air 2) is
+  stuck on 15.8.8**, well below that, so Wake Lock isn't available at all
+  here. Added the pre-Wake-Lock fallback the NoSleep.js library popularized:
+  a tiny (1.7KB), silent, looping, `muted`/`playsinline` black video,
+  base64-embedded directly in the page (no separate asset file) rather than
+  built preemptively -- only added once the real device's OS version showed
+  it was actually needed, per the original plan. Verified it loads and
+  decodes correctly in-browser (`readyState=4`, `duration=2`, no error);
+  the actual keep-awake behavior can only be confirmed on the real iPad
+  itself, not this dev environment's browser.
+- **Client-side `data.json` polling means the initial HTML render is a
+  one-time snapshot, not a live view.** The page loads once and never
+  reloads itself (that's the whole point of a kiosk display) -- so
+  anything baked only into the server-rendered `index.html` would go stale
+  forever after first load. This matters concretely for the 12-hour
+  temperature sparkline added later: it's built from raw sample points in
+  `data.json` and redrawn client-side into an inline SVG on every 60-second
+  refresh, not rendered server-side into static markup.
 
 ## File layout
 
-- `forecast.py` -- NWS forecast API client (plain `requests`)
+- `forecast.py` -- NWS forecast API client (plain `requests`); each period
+  also carries NWS's own condition icon URL, used directly in the forecast
+  strip rather than building a custom condition-to-icon mapping
 - `sun_times.py` -- independent sunrise/sunset via `astral` 1.x
 - `usage_today.py` -- "since local midnight" A/C+EV estimate, reusing
   `energy_report.ha_recorder`'s `get_binary_sensor_intervals()`/
@@ -80,9 +94,15 @@ RMP's actual meter reading to know.
   `ac_kwh_for_hour()`/`ev_kwh_for_hour()`/`AC_ESTIMATED_KW` directly --
   same math as the TOU report's own disaggregation, just queried live
   against "now" instead of the RMP archive's lagging dates
+- `temp_history.py` -- last-12h outdoor temperature readings for the
+  sparkline, reusing `get_numeric_sensor_samples()` directly (same reader,
+  different time window than the current-value read)
 - `render.py` -- HTML/CSS/JS shell + `data.json` builder
 - `generate_dashboard.py` -- CLI entry point, atomic writes, cron target
-- `deploy.sh` -- mirrors `energy_report/deploy.sh`'s pattern exactly
+- `deploy.sh` -- mirrors `energy_report/deploy.sh`'s pattern exactly (also
+  hit and fixed the exact same rsync `--delete`-deletes-`cron.log` bug
+  found and fixed in `energy_report/deploy.sh` -- forgot to carry the
+  exclude over when this file was first written)
 
 Two small, generic reads were added to `energy_report/ha_recorder.py`
 itself (shared across both packages, since `home_dashboard` imports it as
@@ -108,6 +128,20 @@ missing data, never fabricated) as every other reader in that module.
 5. Recreate (not restart) the `ha-proxy` container with one more bind
    mount for this package's output directory.
 
+## Visual iteration (after first deploy, based on user feedback)
+
+- Swapped the hero layout: outdoor temp/condition now on the left (large),
+  the clock moved to the right at 40% of its original size (user's own
+  ask -- the clock was originally the largest, most prominent element;
+  outdoor conditions took priority once seen in practice).
+- Added the Eve Weather sensor's own battery percentage (HA already
+  surfaces it as `sensor.eve_weather_20ebs9901_battery`, a plain
+  percentage sensor -- no new data-fetching pattern needed).
+- Added NWS's own per-period condition icons to the forecast strip, via
+  plain `<img>` tags pointing at NWS's icon URLs -- no local icon set or
+  condition-to-icon mapping to build or maintain.
+- Added the 12-hour outdoor temperature sparkline described above.
+
 ## Known risks / things to watch
 
 - **A/C + EV usage today is an estimate of exactly those two loads, not
@@ -117,27 +151,34 @@ missing data, never fabricated) as every other reader in that module.
   `python3-astral` to a 2.x/3.x release, `sun_times.py`'s `Location`/
   `.sun()` calls would break (different API entirely). Worth a quick
   check after any `apt upgrade` touches this package.
-- **iPad OS version unconfirmed** -- Wake Lock API needs 16.4+; check
-  Settings -> General -> About on the actual device before relying on it,
-  and add the video-fallback trick only if that check shows it's actually
-  needed.
+- **NoSleep-video fallback verified in-browser, not yet on the real
+  iPad** -- the video itself is confirmed to load/decode correctly, but
+  whether it actually prevents iPadOS 15.8's screen from sleeping can only
+  be confirmed on the physical device.
+- **Forecast icons are hotlinked from `api.weather.gov`** -- if NWS's icon
+  server is ever slow/unreachable, those specific images just fail to load
+  (broken image icon), it doesn't take down the rest of the page, but it's
+  an external per-period dependency worth knowing about.
 - **NWS's forecast endpoint is grid-point-specific**
   (`gridpoints/SLC/103,174/forecast`), hardcoded for the house's current
   location -- would need updating if the reference point ever changes.
 
 ## Status
 
-- [x] `forecast.py`
+- [x] `forecast.py` (+ icon URLs)
 - [x] `sun_times.py`
 - [x] `usage_today.py`
-- [x] `render.py`
+- [x] `temp_history.py`
+- [x] `render.py` (layout swap, battery, icons, sparkline, video fallback)
 - [x] `generate_dashboard.py`
-- [x] Unit tests (17 passing, plus 6 new shared-reader tests in
-      `energy_report`'s own suite -- 79 total across both packages)
+- [x] Unit tests (23 passing, plus 6 shared-reader tests in
+      `energy_report`'s own suite -- 85 total across both packages)
 - [x] `deploy.sh`
 - [x] Deployed to domus and verified end-to-end (cron entry live, nginx
       location added, `ha-proxy` container recreated with the new bind
       mount, confirmed live via `curl` against both `index.html` and
-      `data.json`)
-- [ ] Verified on the actual iPad (screen wake behavior, visual layout at
-      the device's real screen size/orientation)
+      `data.json`, all real fields -- battery, icons, sparkline history --
+      populated with live data)
+- [ ] Verified on the actual iPad (screen wake behavior via the video
+      fallback specifically, visual layout at the device's real screen
+      size/orientation)

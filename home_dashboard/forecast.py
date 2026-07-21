@@ -35,6 +35,7 @@ class ForecastPeriod:
     temperature_f: int  # that period's high (daytime) or low (nighttime)
     short_forecast: str
     precip_probability_pct: int  # 0 if NWS reports none for this period
+    icon_url: str | None  # NWS's own condition icon, e.g. ".../icons/land/day/bkn/tsra_hi,40"
 
 
 def _parse_period(raw: dict) -> ForecastPeriod:
@@ -46,6 +47,7 @@ def _parse_period(raw: dict) -> ForecastPeriod:
             temperature_f=int(raw["temperature"]),
             short_forecast=raw["shortForecast"],
             precip_probability_pct=int(precip.get("value") or 0),
+            icon_url=raw.get("icon"),
         )
     except (KeyError, TypeError, ValueError) as err:
         raise ForecastError(f"Unexpected NWS forecast period shape: {raw}") from err

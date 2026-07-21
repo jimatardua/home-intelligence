@@ -18,12 +18,20 @@ import datetime as dt_module
 
 from energy_report.ha_recorder import get_latest_attributes, get_latest_state, open_recorder_db
 from home_dashboard.forecast import ForecastError, get_forecast_periods
-from home_dashboard.render import DashboardContext, ForecastPeriodView, render_data_json, render_html
+from home_dashboard.render import (
+    DashboardContext,
+    ForecastPeriodView,
+    TempHistoryPoint,
+    render_data_json,
+    render_html,
+)
 from home_dashboard.sun_times import get_sun_times
+from home_dashboard.temp_history import get_recent_outdoor_temps
 from home_dashboard.usage_today import get_usage_today
 
 OUTDOOR_TEMP_ENTITY = "sensor.eve_weather_20ebs9901_temperature"
 OUTDOOR_HUMIDITY_ENTITY = "sensor.eve_weather_20ebs9901_humidity"
+OUTDOOR_BATTERY_ENTITY = "sensor.eve_weather_20ebs9901_battery"
 NWS_WEATHER_ENTITY = "weather.nws_40_73657574787062_111_81042551994325_kslc"
 CLIMATE_ENTITY = "climate.family_room_family_room"
 
@@ -57,6 +65,7 @@ def _load_previous_forecast(output_dir: Path) -> list[ForecastPeriodView]:
                 temperature_f=p["temperature_f"],
                 short_forecast=p["short_forecast"],
                 precip_probability_pct=p["precip_probability_pct"],
+                icon_url=p.get("icon_url"),
             )
             for p in previous.get("forecast", [])
         ]
@@ -86,17 +95,25 @@ def _build_context(db_path: Path, output_dir: Path) -> DashboardContext:
                 temperature_f=p.temperature_f,
                 short_forecast=p.short_forecast,
                 precip_probability_pct=p.precip_probability_pct,
+                icon_url=p.icon_url,
             )
             for p in get_forecast_periods()
         ]
     except ForecastError:
         forecast_periods = _load_previous_forecast(output_dir)
 
+    outdoor_battery_pct = _float_or_none(get_latest_state(conn, OUTDOOR_BATTERY_ENTITY))
+    temp_history = [
+        TempHistoryPoint(at_local=p.at_local, temp_f=p.temp_f)
+        for p in get_recent_outdoor_temps(conn, now_local, hours=12)
+    ]
+
     return DashboardContext(
         generated_at=now_local,
         outdoor_temp_f=outdoor_temp_f,
         outdoor_humidity_pct=outdoor_humidity_pct,
         condition=condition,
+        outdoor_battery_pct=outdoor_battery_pct,
         indoor_temp_f=_float_or_none(climate_attrs.get("current_temperature")),
         indoor_humidity_pct=_float_or_none(climate_attrs.get("current_humidity")),
         hvac_mode=hvac_mode,
@@ -109,6 +126,7 @@ def _build_context(db_path: Path, output_dir: Path) -> DashboardContext:
         usage_today_ac_kwh=usage.ac_kwh,
         usage_today_ev_kwh=usage.ev_kwh,
         forecast_periods=forecast_periods,
+        outdoor_temp_history=temp_history,
     )
 
 

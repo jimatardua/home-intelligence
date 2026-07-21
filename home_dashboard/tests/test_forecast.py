@@ -56,6 +56,38 @@ def test_get_forecast_periods_parses_real_shape():
     assert periods[1].is_daytime is False
 
 
+def test_icon_url_extracted_when_present():
+    body = {
+        "properties": {
+            "periods": [
+                {
+                    "name": "Today",
+                    "isDaytime": True,
+                    "temperature": 98,
+                    "shortForecast": "Sunny",
+                    "icon": "https://api.weather.gov/icons/land/day/skc?size=medium",
+                }
+            ]
+        }
+    }
+    with patch("home_dashboard.forecast.requests.get", return_value=_mock_response(body)):
+        [period] = get_forecast_periods()
+    assert period.icon_url == "https://api.weather.gov/icons/land/day/skc?size=medium"
+
+
+def test_missing_icon_field_becomes_none_not_a_crash():
+    body = {
+        "properties": {
+            "periods": [
+                {"name": "Today", "isDaytime": True, "temperature": 98, "shortForecast": "Sunny"}
+            ]
+        }
+    }
+    with patch("home_dashboard.forecast.requests.get", return_value=_mock_response(body)):
+        [period] = get_forecast_periods()
+    assert period.icon_url is None
+
+
 def test_get_forecast_periods_respects_limit():
     with patch("home_dashboard.forecast.requests.get", return_value=_mock_response(_SAMPLE_RESPONSE)):
         periods = get_forecast_periods(limit=1)

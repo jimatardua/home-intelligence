@@ -6,6 +6,21 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.11] - 2026-07-21
+
+- Home dashboard visual updates based on real usage feedback: swapped the
+  clock and outdoor-temp hero positions (clock now smaller, secondary);
+  added the Eve Weather sensor's own battery percentage; added NWS's own
+  per-period condition icons to the forecast strip; added a 12-hour
+  outdoor-temperature sparkline (client-side rendered from `data.json`,
+  since the page never reloads itself after first load).
+- Confirmed the actual iPad is stuck on iPadOS 15.8.8, below the 16.4
+  Wake Lock API threshold -- added the NoSleep.js-style silent looping
+  video fallback (a 1.7KB base64-embedded clip) for pre-Wake-Lock Safari.
+- Fixed the same rsync `--delete`-deletes-`cron.log` bug (previously found
+  and fixed in `energy_report/deploy.sh`) in `home_dashboard/deploy.sh`,
+  which hadn't carried the same exclude over when first written.
+
 ## [1.0.10] - 2026-07-21
 
 - Add `home_dashboard/`, a cron-generated home dashboard replacing an aging
