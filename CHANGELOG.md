@@ -6,6 +6,12 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.17] - 2026-07-21
+
+- Move the Eve Weather battery indicator from under the outdoor temp (now
+  dead center of the hero row) to a fixed, unobtrusive spot in the page's
+  bottom-right corner.
+
 ## [1.0.16] - 2026-07-21
 
 - Sun card: dropped the redundant "Sun" label and enlarged the sunrise/

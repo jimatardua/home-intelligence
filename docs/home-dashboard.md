@@ -291,6 +291,18 @@ their coincidental correctness only holds as long as the covering shape
 (cloud) exactly matches the masked region, this is worth a closer look if
 those icons are ever revised -- see "Known risks" below.
 
+### Battery indicator moved to a fixed page corner
+
+Originally sat directly under the outdoor temp/condition text; once that
+block moved to the middle of the hero row, the battery percentage read as
+oddly prominent (dead center of the screen) for a minor, infrequently-
+interesting detail. Moved to `position:fixed` in the page's bottom-right
+corner instead -- present but unobtrusive, out of the main content flow
+entirely, using the same `env(safe-area-inset-*)` pattern as the body
+padding for correctness on any device. No JS change needed: the element
+kept its `id="battery"`, so `applyData()`'s existing update call didn't
+need to change, only where that element sits in the page.
+
 ### PWA: installable, standalone, no Safari chrome
 
 The user wanted to "Add to Home Screen" on the iPad and have it launch

@@ -251,7 +251,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .outdoor{{text-align:center}}
 .outdoor .temp{{font-size:min(10vw,90px);font-weight:800;line-height:1}}
 .outdoor .condition{{font-size:min(3vw,22px);color:var(--muted)}}
-.outdoor .battery{{font-size:min(2vw,14px);color:var(--muted);margin-top:2px}}
+.battery-corner{{position:fixed;bottom:max(1vh,env(safe-area-inset-bottom));right:max(1vw,env(safe-area-inset-right));font-size:min(1.8vw,13px);color:var(--muted)}}
 .hero-stats{{display:flex;gap:6vw}}
 .hero-stats .stat{{text-align:center}}
 .hero-stats .stat-value{{font-size:min(5.6vw,48px);font-weight:800;line-height:1}}
@@ -299,7 +299,6 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   <div class="outdoor">
     <div class="temp" id="outdoor-temp">--</div>
     <div class="condition" id="outdoor-condition"></div>
-    <div class="battery" id="battery"></div>
   </div>
   <div class="clock-block">
     <div class="clock" id="clock">--:--</div>
@@ -338,6 +337,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 </div>
 
 <div class="forecast" id="forecast"></div>
+
+<div class="battery-corner" id="battery"></div>
 
 <!-- Silent, looping, muted 2x2px black video -- a pre-Wake-Lock-API trick
      (the same one NoSleep.js uses) for browsers too old for
