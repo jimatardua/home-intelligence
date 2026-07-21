@@ -6,6 +6,15 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.9] - 2026-07-21
+
+- Switch the TOU report's outdoor-temperature source from NWS (nearest
+  station) to a physical Eve Weather sensor mounted at the house
+  (`sensor.eve_weather_20ebs9901_temperature`), commissioned via Matter
+  multi-admin sharing from Alexa. A plain `sensor` entity rather than a
+  `weather` entity, so this reads via `get_numeric_sensor_samples()`
+  instead of `get_weather_temperature_samples()`.
+
 ## [1.0.8] - 2026-07-18
 
 - Fix the "Data as of" header timestamp showing UTC instead of local time

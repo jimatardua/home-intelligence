@@ -94,29 +94,39 @@ the conservative, correct behavior -- not a bug.
 temperature against total usage and A/C-specific usage (both in kWh, on the
 same axis -- A/C runtime hours is shown as a tooltip aside rather than a
 third chart axis, since it's a fixed multiple of A/C kWh under the constant-
-draw model). Temperature reads from a weather entity's `temperature`
-attribute -- weather entities store a condition string ("sunny") in their
-own `state` column, not the reading itself, so this reads
-`state_attributes` directly rather than the plain `state` column the other
-numeric sensors use.
+draw model).
 
-The weather entity itself is HA's built-in **NWS** (National Weather
-Service) integration (`weather.nws_..._kslc`, station KSLC), not the
-`met` (Met.no) integration initially investigated -- Met.no is a pure
-forecast-model value with no ground station feed (confirmed via its config
-entry and API design), while NWS's "current conditions" pulls a real
-METAR/ASOS station observation (visible in its own attributes, e.g. a
-`visibility` field Met.no doesn't report). NWS's config flow validates
-the station live against the real NWS API rather than being purely
-offline-configurable, so setting it up means either the HA UI
-(Settings -> Devices & Services -> Add Integration) or replicating that
-same validation call directly (`pynws.SimpleNWS.set_station()`) before
-constructing the config entry by hand -- the latter is what was actually
-done here, confirmed against a live `ha core check`-equivalent restart with
-no errors and a real station observation landing in the recorder DB.
-Historical temperature data only exists from whenever NWS was actually set
-up forward -- earlier report dates will show a temperature gap, same
-gap-aware handling as everywhere else in this report.
+The temperature source went through three iterations, each a genuine
+accuracy upgrade, not just a config change:
+1. **Met.no** (`weather.forecast_home`, HA's built-in default) -- a pure
+   forecast-model value with no ground station feed (confirmed via its
+   config entry and API design). Weather entities store a condition string
+   ("sunny") in their own `state` column, not the reading itself, so this
+   required reading `state_attributes` directly
+   (`get_weather_temperature_samples()` in `ha_recorder.py`).
+2. **NWS** (National Weather Service, `weather.nws_..._kslc`, station
+   KSLC) -- a real METAR/ASOS station observation (visible in its own
+   attributes, e.g. a `visibility` field Met.no doesn't report), just from
+   the nearest station rather than the house itself. NWS's config flow
+   validates the station live against the real NWS API rather than being
+   purely offline-configurable; set up by replicating that same validation
+   call (`pynws.SimpleNWS.set_station()`) before constructing the config
+   entry by hand.
+3. **Eve Weather** (`sensor.eve_weather_20ebs9901_temperature`) -- a
+   physical sensor mounted outside the house itself, the final and most
+   accurate source: a genuine at-the-house measurement rather than a
+   model or a nearest-station reading. Matter-over-Thread, commissioned to
+   Alexa (the Echo Studio's Thread border router) and shared into Home
+   Assistant via Matter's multi-admin support -- a config-entry-free path
+   for adding it to HA. It's a plain `sensor` entity (its own `state`
+   column holds the reading directly), not a `weather` entity, so this
+   reads via the ordinary `get_numeric_sensor_samples()` rather than the
+   attribute-based reader the two weather-entity sources needed.
+
+Historical temperature data only exists from whenever whichever source was
+actually in place at the time -- earlier report dates than a given source's
+setup will show a temperature gap for that source, same gap-aware handling
+as everywhere else in this report.
 
 **Billing-month tiering** approximates with calendar-month boundaries
 (`BILLING_CYCLE_START_DAY`), stated explicitly in the report rather than

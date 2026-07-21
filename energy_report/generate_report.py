@@ -25,12 +25,7 @@ from pathlib import Path
 from .archive_loader import coverage_by_date, load_archive
 from .billing import compute_schedule1_cost, compute_tou_cost, total_cost
 from .disaggregation import disaggregate_hour
-from .ha_recorder import (
-    get_binary_sensor_intervals,
-    get_numeric_sensor_samples,
-    get_weather_temperature_samples,
-    open_recorder_db,
-)
+from .ha_recorder import get_binary_sensor_intervals, get_numeric_sensor_samples, open_recorder_db
 from .render import DailyBreakdown, LeverRow, ReportContext, render_report
 from .sensitivity import (
     billable_hours_from_disaggregation,
@@ -44,12 +39,15 @@ import datetime as dt_module
 AC_ENTITY = "binary_sensor.family_room_ac_running"
 EV_ENTITIES = {"jim": "sensor.jim_s_tesla_charger_power", "irina": "sensor.irina_s_tesla_charger_power"}
 EV_LABELS = {"jim": "Jim's Tesla", "irina": "Irina's Tesla"}
-# NWS (National Weather Service) reports real METAR/ASOS station
-# observations for "current conditions" -- weather.forecast_home (Met.no)
-# is a pure forecast-model value with no ground station feed. Switched once
-# NWS was added; historical data only exists from whenever NWS was set up
-# forward, so early reports will show gaps for dates before that.
-WEATHER_ENTITY = "weather.nws_40_73657574787062_111_81042551994325_kslc"
+# A physical Eve Weather sensor mounted just outside the house (Matter,
+# commissioned via Alexa multi-admin) -- a genuine at-the-house measurement,
+# replacing NWS's nearest-station reading (itself a replacement for Met.no's
+# pure forecast-model value). Exposed as a plain `sensor` entity (its own
+# `state` column holds the reading directly), not a `weather` entity, so
+# this reads via get_numeric_sensor_samples() rather than
+# get_weather_temperature_samples(). Historical data only exists from
+# whenever this sensor was added forward.
+WEATHER_ENTITY = "sensor.eve_weather_20ebs9901_temperature"
 
 DAYS_INSUFFICIENT = 14
 DAYS_SEASONAL = 60
@@ -99,7 +97,7 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
         car: get_numeric_sensor_samples(conn, entity, window_start, window_end)
         for car, entity in EV_ENTITIES.items()
     }
-    weather_samples = get_weather_temperature_samples(conn, WEATHER_ENTITY, window_start, window_end)
+    weather_samples = get_numeric_sensor_samples(conn, WEATHER_ENTITY, window_start, window_end)
 
     hours = [
         disaggregate_hour(r.start_local, r.usage_kwh, ac_intervals, ev_samples) for r in readings
