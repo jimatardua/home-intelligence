@@ -102,8 +102,13 @@ RMP's actual meter reading to know.
 - `temp_history.py` -- last-12h outdoor temperature readings for the
   sparkline, reusing `get_numeric_sensor_samples()` directly (same reader,
   different time window than the current-value read)
-- `render.py` -- HTML/CSS/JS shell + `data.json` builder
-- `generate_dashboard.py` -- CLI entry point, atomic writes, cron target
+- `render.py` -- HTML/CSS/JS shell + `data.json`/`manifest.json` builder,
+  plus the base64-embedded PWA icon constants
+- `generate_dashboard.py` -- CLI entry point; every cron run atomically
+  writes `index.html`, `data.json`, `manifest.json`, `apple-touch-icon.png`,
+  and `icon-512.png` (the latter three are static/PWA-related but still
+  regenerated every run, since `output/` is entirely cron-owned with no
+  other mechanism to place a file there)
 - `deploy.sh` -- mirrors `energy_report/deploy.sh`'s pattern exactly (also
   hit and fixed the exact same rsync `--delete`-deletes-`cron.log` bug
   found and fixed in `energy_report/deploy.sh` -- forgot to carry the
@@ -232,6 +237,61 @@ client-side in `drawSparkline()` from the actual `data.json` history array
 -- not hardcoded to a 12-hour assumption, so it still labels correctly if
 the window has less data than that (e.g. shortly after a restart).
 
+### PWA: installable, standalone, no Safari chrome
+
+The user wanted to "Add to Home Screen" on the iPad and have it launch
+without Safari's URL bar/toolbar, so it reads as a dedicated kiosk app
+rather than a browser tab left open. iOS's standalone-display behavior is
+driven entirely by Apple-specific meta tags and a web app manifest, not a
+service worker.
+
+- **No service worker, deliberately.** iOS's "Add to Home Screen" standalone
+  mode doesn't need one -- that's purely the `apple-mobile-web-app-capable`
+  meta tag. Service workers matter more for Chrome/Android's stricter
+  installability heuristics and for actual offline asset caching, neither
+  of which this page needs: it already keeps last-known-good data on a
+  transient `data.json` fetch failure, and is deliberately designed to
+  never reload once loaded. A service worker would add cache-versioning/
+  staleness risk for a kiosk that's always on the home network, for no
+  real benefit -- considered and rejected.
+- **Icons are real files, not `data:` URIs, on purpose.** Mobile Safari has
+  a long-standing, widely-reported quirk where `apple-touch-icon` doesn't
+  reliably honor `data:` URIs (it uses a different icon-fetch path than
+  normal resource loading, and has been observed falling back to a
+  screenshot or a default icon instead). Since the actual home-screen icon
+  is the single riskiest unknown in this whole change and iOS 15.8 is the
+  exact target, it isn't worth betting on that quirk. Instead: a sun-glyph
+  icon (amber circle + rays, matching the vendored "clear-day" Meteocons
+  icon's own color, derived from that SVG's actual fill rather than
+  re-hardcoded) is drawn once via a local Pillow script -- a dev-machine-only
+  tool, never a domus dependency, the same relationship `ffmpeg` has to the
+  NoSleep video below -- at 180x180 and 512x512, base64-embedded as
+  constants in `render.py` (same storage pattern as `_NOSLEEP_VIDEO_BASE64`),
+  and decoded to real files (`apple-touch-icon.png`, `icon-512.png`) by
+  `generate_dashboard.py` every cron run, referenced by plain relative URLs.
+- **`manifest.json` is rendered fresh every run** via `render_manifest_json()`
+  -- no live data involved, but generating it in Python lets it share
+  `render.py`'s `BG_COLOR` (and friends) with the CSS instead of hardcoding
+  the same hex value in two places.
+- **`"orientation": "landscape"`** is set to match how the iPad is actually
+  mounted, but iOS Safari has never honored this manifest field for
+  standalone web apps (that's a Chrome/Android behavior) -- it's included
+  because it's spec-correct and free, not because it does anything on the
+  real device. The landscape lock in practice comes entirely from the
+  physical mount and the device's own rotation lock.
+- **Safe-area padding** (`env(safe-area-inset-*)`, requiring
+  `viewport-fit=cover` on the viewport meta tag -- without it every inset
+  resolves to `0` regardless of CSS) is real and correct, but the iPad
+  Air 2 has a physical home button and no notch or rounded display corners,
+  so every inset is `0` on this exact device today. This is forward-compat
+  for a different/future device, not a fix for any clipping actually
+  observed on the current hardware.
+- **No deploy.sh/nginx/docker changes needed.** All three new outputs
+  (`manifest.json`, `apple-touch-icon.png`, `icon-512.png`) land in the same
+  cron-written `output/` directory the existing `location /dashboard/`
+  block already serves; nginx's default `mime.types` already maps
+  `.json`/`.png` correctly. Confirmed live via `curl`, not just assumed.
+
 ## Known risks / things to watch
 
 - **A/C + EV usage today is an estimate of exactly those two loads, not
@@ -254,6 +314,15 @@ the window has less data than that (e.g. shortly after a restart).
 - **NWS's forecast endpoint is grid-point-specific**
   (`gridpoints/SLC/103,174/forecast`), hardcoded for the house's current
   location -- would need updating if the reference point ever changes.
+- **PWA icon/manifest behavior confirmed via browser inspection and `curl`
+  only, not yet via an actual "Add to Home Screen" on the real iPad** --
+  same "confirmed in-browser, not on-device yet" pattern already applying
+  to the NoSleep-video fallback above. Specifically unverified: whether
+  `apple-touch-icon.png` actually becomes the home-screen icon (rather than
+  a fallback screenshot -- the exact risk avoiding `data:` URIs was meant to
+  mitigate, but still only provable on-device); whether the launched app is
+  genuinely chrome-free/standalone; whether `black-translucent` looks right
+  against this device's actual status bar.
 
 ## Status
 
@@ -262,18 +331,21 @@ the window has less data than that (e.g. shortly after a restart).
 - [x] `usage_today.py`
 - [x] `temp_history.py`
 - [x] `render.py` (layout swap, battery, icons, sparkline + axis labels,
-      video fallback)
+      video fallback, PWA manifest/icons/meta tags)
 - [x] `generate_dashboard.py`
 - [x] `weather_icons.py` + vendored `icons/*.svg` (Meteocons, flat style,
       MIT licensed, replacing the original NWS-hotlinked `<img>` icons)
-- [x] Unit tests (39 passing in `home_dashboard`, 62 in `energy_report` --
-      101 total across both packages)
+- [x] PWA: `manifest.json`, `apple-touch-icon.png`, `icon-512.png` --
+      installable/standalone on iOS, no service worker (see "PWA" above)
+- [x] Unit tests (47 passing in `home_dashboard`, 62 in `energy_report` --
+      109 total across both packages)
 - [x] `deploy.sh`
 - [x] Deployed to domus and verified end-to-end (cron entry live, nginx
       location added, `ha-proxy` container recreated with the new bind
-      mount, confirmed live via `curl` against both `index.html` and
-      `data.json`, all real fields -- battery, icons, sparkline history --
-      populated with live data)
+      mount, confirmed live via `curl` against `index.html`, `data.json`,
+      `manifest.json`, and both icon PNGs -- all real fields, including the
+      new PWA outputs, populated/served correctly)
 - [ ] Verified on the actual iPad (screen wake behavior via the video
-      fallback specifically, visual layout at the device's real screen
+      fallback, "Add to Home Screen" installability and standalone
+      launch behavior, visual layout at the device's real screen
       size/orientation)

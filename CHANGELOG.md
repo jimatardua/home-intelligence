@@ -6,6 +6,18 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.14] - 2026-07-21
+
+- Turn the home dashboard into an installable PWA: "Add to Home Screen" on
+  the iPad now launches standalone (no Safari chrome), via a web app
+  manifest and Apple-specific meta tags -- no service worker, since iOS
+  standalone display doesn't need one and this page already handles
+  offline/fetch-failure gracefully. A sun-glyph app icon (matching the
+  vendored "clear-day" icon's amber tone) is generated once via a local
+  Pillow script and written as real PNG files every cron run (not `data:`
+  URIs, to avoid a known Mobile Safari `apple-touch-icon` reliability
+  quirk). No deploy.sh/nginx changes needed -- confirmed live via `curl`.
+
 ## [1.0.13] - 2026-07-21
 
 - Fill the empty space between the outdoor temp and the clock with chance

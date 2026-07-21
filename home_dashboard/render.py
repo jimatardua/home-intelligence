@@ -15,11 +15,44 @@ for that at all.
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
 
 from home_dashboard.icons import load_icon_sprite
+
+# Shared with both the CSS (:root custom properties) and manifest.json's
+# background_color/theme_color, so the two can't silently drift apart.
+BG_COLOR = "#0b0e14"
+CARD_COLOR = "#161b26"
+TEXT_COLOR = "#f2f4f8"
+MUTED_COLOR = "#8b93a7"
+ACCENT_COLOR = "#4da3ff"
+
+# PWA home-screen icons (180x180 apple-touch-icon, 512x512 for manifest.json)
+# -- a sun glyph matching the vendored "clear-day" Meteocons icon's amber
+# tone, drawn via Pillow (a one-off dev-machine script, not a runtime
+# dependency -- see docs/home-dashboard.md). Stored as base64 here and
+# decoded to real files by generate_dashboard.py rather than referenced as
+# data: URIs directly, since Mobile Safari has a long-standing quirk where
+# apple-touch-icon doesn't reliably honor data: URIs.
+_APPLE_TOUCH_ICON_PNG_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAAFdklEQVR4nO3cS27iQBSFYUCZRepJZX+9tuwvNYnErKW0rFZaQMD4Ua97zv8tILHLPzcVAz4eBvD66+2r9zFgv/Pnx/HQWZcDIGAP5w6BN/uFROzt3Cjuqr+EiNE67io/mJDRK+xT6R9IzOjZSrFXCCFjhGldZEITM0ZpaNergpAx2rTePKGJGbXsaWtT0MSM2rY2tjpoYkYrW1pbFTQxo7W1zS0OmpjRy5r2FgVNzOhtaYNPgyZmjGJJi8Xf+gZ6mg2a6YzRPGvyYdDEjFHNtcmWA1LuBs10xugeNfojaGJGFPdaZcsBKVdBM50RzW2zTGhIeel9AKry+/2lTb//ND8WJ/8nNNsNRHXZLlsOSCFo6AXNdgPRfTfMhIYUgoYUgoaUE/tnqJhaZkJDCkFDCkFDCkFDCkFDCkFDCkFDCkFDyknpw/PAKWrMRF1/jSM6Rnrr+95C85WmemucAn5d7BR9akSeJqPJN2sZcW3DBD03LSIu/GiyyMAIE/SEqOvIM9FG23aECnpC1GVloZhDBj0h6jKyWMxhg54Q9T5ZMObQQU+IepssGnP4oCdEvU4Wjlki6AlRL5PFYw73TmGUC7bm3m2r48qDrE1tUkH3eHu8xhsPpY83m8QsGXSLzyO0fPes1PFnk8/BSAb9fQFbTrraSpxLDv7BI+ugSxrp8wx7Q8wVXugjIeggId9SjvLgftvOLeYIx9cLQQeOJcpxtsSWQyQQtiD/MKEFYlY4/lIIWiiGLHIee9gHrRZBFjuftayDVr34WfS8lrANWv2iZ/Hze8Q2aGiyDNplemWT87QO2u0iZ7PztQra7eI6nrdV0NBnE7TTlHI+f5ug4cEiaJfp9IzDOlgEDR/yQTtMpTWy+HrIBw0vBA0p0kGr/3ndKguvi3TQ8EPQkELQkELQkCIbtPI/PiVk0fWRDRqeXqJNAx6ogjmaf3dgO4zYckAKQUMKQUMKQUNKk38KuTOBVrjLAalhxJYDUmSDjjZZWkui6yMbNDwRNKQQNKQQNKRIB636j89eSXhdpIOGH4KGFPmglf+8bpHE10M+aHixCFp9Ki2VDNbBImj4sAnaYTrNcTl/m6DhwSpolynlfN5WQbtdXMfztQva6SInk/M8uAcNXbZBq0+vJH5+j9gGrXzRk+h5LWEdtOLFT2Lns5Z90EoRJJHz2IOgRWKIfvylHF9/vX0V+2kiIj3dnpCvMaEDRxLlOFuSDnrPpB09ltGPrxfZLcdlzHsv/khbkBIh5/cX2ReEZND3AiwVQi+lAswFX+gjkgt6LroaUdRWMrpc6YU+EqmgW8S85nduVeNYc4e16UEm6JEu2JrIWx5bHmiNapEI2uFClZLF1yr8bTv1C1RamlmTke7mWAZNzNsk4ajDBk3M+yTRqEMGTcxlJMGowwVNzGUlsahDBU3MdSShqE8KC8/djHprGy3qUEHfW3hirre2Edc47BsrUT4x9mi6jXzsOfAHmMJN6KgLHXFtU8A1Dhs06koBY54QNKQQNKQQNKQQNKQQNKQQNKQQNKQQNKQQNKSczp8fx94HAZQwtcyEhhSChhSChl7Q7KMR3XfDTGhIIWhoBs22A1Fdtnt1Dzrq17Hg7XwRNFsOSLkKmm0HorltlgkNKT+CZkojinut3p3QRI3RPWqULQekPAyaKY1RzbU5O6GJGqN51iRbDkh5GjRTGqNY0uKiCU3U6G1pg4u3HESNXta0t2oPTdRobW1zq/8pJGq0sqW1TXc5iBq1bW1s8207okYte9oq8pAZvhiAEkoMySJvrDCtMUpDxR8DxrRGz2FY/K1vpjV6tlL1QY1Ma7Qees2ePErc3s6NnnLb5VG6xO3h3OFRzUM8G5rANZwHeNb4X/G8IqGzLGJrAAAAAElFTkSuQmCC"
+)
+
+_APP_ICON_512_PNG_BASE64 = (
+    "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"
+)
+
+
+def apple_touch_icon_png_bytes() -> bytes:
+    return base64.b64decode(_APPLE_TOUCH_ICON_PNG_BASE64)
+
+
+def app_icon_512_png_bytes() -> bytes:
+    return base64.b64decode(_APP_ICON_512_PNG_BASE64)
+
 
 # A minimal (1.7KB) silent, black, 2x2px, 2-second H.264 video, base64-encoded
 # -- the classic NoSleep.js-style keep-awake trick for iOS versions older
@@ -157,6 +190,39 @@ def render_data_json(ctx: DashboardContext) -> str:
     return json.dumps(_data_dict(ctx))
 
 
+def render_manifest_json() -> str:
+    """Web app manifest for "Add to Home Screen" installs.
+
+    No live data involved -- generated fresh on every cron run anyway (like
+    index.html/data.json) so it shares BG_COLOR with the CSS rather than
+    duplicating the hex value. Relative start_url/scope (".") so it's
+    correct regardless of nginx's /dashboard/ mount path, matching the
+    existing relative fetch('data.json') convention.
+
+    "orientation": "landscape" matches how the target iPad is physically
+    mounted, but note iOS Safari has never actually honored this field for
+    standalone web apps (that's a Chrome/Android behavior) -- included
+    because it's spec-correct and free, not because it does anything on
+    the real device.
+    """
+    return json.dumps(
+        {
+            "name": "Home",
+            "short_name": "Home",
+            "start_url": ".",
+            "scope": ".",
+            "display": "standalone",
+            "orientation": "landscape",
+            "background_color": BG_COLOR,
+            "theme_color": BG_COLOR,
+            "icons": [
+                {"src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png"},
+                {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"},
+            ],
+        }
+    )
+
+
 def render_html(ctx: DashboardContext) -> str:
     initial_data = json.dumps(_data_dict(ctx))
 
@@ -164,13 +230,23 @@ def render_html(ctx: DashboardContext) -> str:
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Home</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Home">
+<meta name="theme-color" content="{BG_COLOR}">
 <style>
-:root{{--bg:#0b0e14;--card:#161b26;--text:#f2f4f8;--muted:#8b93a7;--accent:#4da3ff;--r:16px;--gap:16px}}
+:root{{--bg:{BG_COLOR};--card:{CARD_COLOR};--text:{TEXT_COLOR};--muted:{MUTED_COLOR};--accent:{ACCENT_COLOR};--r:16px;--gap:16px}}
 *{{margin:0;padding:0;box-sizing:border-box}}
 html,body{{height:100%;overflow:hidden}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;padding:2vh 2vw;gap:var(--gap)}}
+/* env(safe-area-inset-*) needs viewport-fit=cover above to be non-zero at
+   all -- real and correct, but a no-op on the target iPad Air 2 itself
+   (physical home button, no notch/rounded corners); kept for correctness
+   on any other device this might run on. */
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;padding:max(2vh,env(safe-area-inset-top)) max(2vw,env(safe-area-inset-right)) max(2vh,env(safe-area-inset-bottom)) max(2vw,env(safe-area-inset-left));gap:var(--gap)}}
 .hero{{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--gap)}}
 .outdoor .temp{{font-size:min(10vw,90px);font-weight:800;line-height:1}}
 .outdoor .condition{{font-size:min(3vw,22px);color:var(--muted)}}

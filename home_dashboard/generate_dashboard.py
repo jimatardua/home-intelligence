@@ -22,8 +22,11 @@ from home_dashboard.render import (
     DashboardContext,
     ForecastPeriodView,
     TempHistoryPoint,
+    app_icon_512_png_bytes,
+    apple_touch_icon_png_bytes,
     render_data_json,
     render_html,
+    render_manifest_json,
 )
 from home_dashboard.sun_times import get_sun_times
 from home_dashboard.temp_history import get_recent_outdoor_temps
@@ -137,6 +140,13 @@ def _atomic_write(path: Path, content: str) -> None:
     os.rename(tmp, path)
 
 
+def _atomic_write_bytes(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(content)
+    os.rename(tmp, path)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db-path", required=True, type=Path)
@@ -146,7 +156,16 @@ def main() -> int:
     ctx = _build_context(args.db_path, args.output_dir)
     _atomic_write(args.output_dir / "index.html", render_html(ctx))
     _atomic_write(args.output_dir / "data.json", render_data_json(ctx))
-    print(f"Wrote {args.output_dir}/index.html and data.json")
+    # manifest.json/icons never depend on ctx, but are regenerated every run
+    # anyway since output/ is entirely cron-owned -- there's no other
+    # mechanism to place a static file there (see docs/home-dashboard.md).
+    _atomic_write(args.output_dir / "manifest.json", render_manifest_json())
+    _atomic_write_bytes(args.output_dir / "apple-touch-icon.png", apple_touch_icon_png_bytes())
+    _atomic_write_bytes(args.output_dir / "icon-512.png", app_icon_512_png_bytes())
+    print(
+        f"Wrote {args.output_dir}/index.html, data.json, manifest.json, "
+        "apple-touch-icon.png, and icon-512.png"
+    )
     return 0
 
 
