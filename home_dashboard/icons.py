@@ -30,6 +30,22 @@ ICON_NAMES = frozenset(
         "fog",
         "smoke",
         "wind",
+        # Not NWS forecast conditions -- used directly by the Sun card,
+        # not via weather_icons.py's condition-code mapping. Two changes
+        # from the original Meteocons artwork: the horizon line's stroke
+        # color (#202939 -> this page's --muted gray #8b93a7, since the
+        # original was nearly invisible against the dashboard's near-black
+        # background), and the sun's "peeking over the horizon" crop is
+        # baked directly into the path/circle geometry rather than done via
+        # a <mask>/<clipPath> -- the original mask-based crop silently
+        # failed to apply when instantiated via <use> from within this
+        # sprite (confirmed via a side-by-side render; other vendored icons
+        # that use an internal mask happen to look correct anyway only
+        # because an opaque shape drawn on top, e.g. a cloud, coincidentally
+        # covers the same overflow). The three rays that would cross the
+        # horizon are simply omitted rather than clipped.
+        "sunrise",
+        "sunset",
     }
 )
 

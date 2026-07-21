@@ -246,8 +246,9 @@ html,body{{height:100%;overflow:hidden}}
    all -- real and correct, but a no-op on the target iPad Air 2 itself
    (physical home button, no notch/rounded corners); kept for correctness
    on any other device this might run on. */
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;padding:max(2vh,env(safe-area-inset-top)) max(2vw,env(safe-area-inset-right)) max(2vh,env(safe-area-inset-bottom)) max(2vw,env(safe-area-inset-left));gap:var(--gap)}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;padding:max(4vh,env(safe-area-inset-top)) max(2vw,env(safe-area-inset-right)) max(2vh,env(safe-area-inset-bottom)) max(2vw,env(safe-area-inset-left));gap:var(--gap)}}
 .hero{{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--gap)}}
+.outdoor{{text-align:center}}
 .outdoor .temp{{font-size:min(10vw,90px);font-weight:800;line-height:1}}
 .outdoor .condition{{font-size:min(3vw,22px);color:var(--muted)}}
 .outdoor .battery{{font-size:min(2vw,14px);color:var(--muted);margin-top:2px}}
@@ -263,6 +264,10 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .card .label{{font-size:min(2vw,13px);color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}}
 .card .value{{font-size:min(5vw,40px);font-weight:700}}
 .card .sub{{font-size:min(2.2vw,15px);color:var(--muted);margin-top:6px}}
+.sun-row{{display:flex;justify-content:space-around;align-items:center}}
+.sun-item{{display:flex;flex-direction:column;align-items:center;gap:4px}}
+.sun-item svg.icon{{width:min(7vw,40px);height:min(7vw,40px)}}
+.sun-item .sun-time{{font-size:min(2.4vw,17px);font-weight:700}}
 .sparkline-card{{background:var(--card);border-radius:var(--r);padding:1.5vh 2vw}}
 .sparkline-card .label{{font-size:min(2vw,13px);color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px}}
 .sparkline-card svg{{width:100%;height:11vh;display:block}}
@@ -281,11 +286,6 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 {load_icon_sprite()}
 
 <div class="hero">
-  <div class="outdoor">
-    <div class="temp" id="outdoor-temp">--</div>
-    <div class="condition" id="outdoor-condition"></div>
-    <div class="battery" id="battery"></div>
-  </div>
   <div class="hero-stats">
     <div class="stat">
       <div class="stat-value" id="rain-chance">--</div>
@@ -295,6 +295,11 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
       <div class="stat-value" id="humidity">--</div>
       <div class="stat-label">Humidity</div>
     </div>
+  </div>
+  <div class="outdoor">
+    <div class="temp" id="outdoor-temp">--</div>
+    <div class="condition" id="outdoor-condition"></div>
+    <div class="battery" id="battery"></div>
   </div>
   <div class="clock-block">
     <div class="clock" id="clock">--:--</div>
@@ -310,8 +315,16 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   </div>
   <div class="card">
     <div class="label">Sun</div>
-    <div class="value" id="sun-value" style="font-size:min(4vw,32px)">--</div>
-    <div class="sub" id="sun-sub"></div>
+    <div class="sun-row">
+      <div class="sun-item">
+        <svg class="icon"><use href="#icon-sunrise"></use></svg>
+        <div class="sun-time" id="sunrise-time">--</div>
+      </div>
+      <div class="sun-item">
+        <svg class="icon"><use href="#icon-sunset"></use></svg>
+        <div class="sun-time" id="sunset-time">--</div>
+      </div>
+    </div>
   </div>
   <div class="card">
     <div class="label">A/C + EV Today (est.)</div>
@@ -400,8 +413,8 @@ function applyData(d) {{
   const hvac = d.hvac_action && d.hvac_action !== 'off' ? d.hvac_action : (d.hvac_mode || 'off');
   document.getElementById('thermostat-sub').textContent = 'Set to ' + d.thermostat_label + ' (' + hvac + ')';
 
-  document.getElementById('sun-value').textContent = d.sunrise + ' / ' + d.sunset;
-  document.getElementById('sun-sub').textContent = 'Sunrise / Sunset';
+  document.getElementById('sunrise-time').textContent = d.sunrise;
+  document.getElementById('sunset-time').textContent = d.sunset;
 
   const usageTotal = (d.usage_today_ac_kwh || 0) + (d.usage_today_ev_kwh || 0);
   document.getElementById('usage-value').textContent = usageTotal.toFixed(1) + ' kWh';

@@ -237,6 +237,55 @@ client-side in `drawSparkline()` from the actual `data.json` history array
 -- not hardcoded to a 12-hour assumption, so it still labels correctly if
 the window has less data than that (e.g. shortly after a restart).
 
+### Hero row: more top margin, temperature moved to the middle
+
+The temperature felt crowded against the very top edge once the PWA
+safe-area padding shipped (still `max(2vh, ...)` at the time) -- bumped the
+body's top padding to `max(4vh, ...)`. Separately, moved the outdoor temp/
+condition/battery block from the left position to the middle of the hero
+row (between the rain/humidity stats and the clock), centering the single
+largest element instead of pinning it to the left edge; `.outdoor` picked
+up `text-align:center` to match its new position.
+
+### Sun card: icons instead of a single combined time string
+
+Replaced the "6:12 AM / 8:45 PM" single value with two icon+time pairs
+(sunrise icon above the sunrise time, sunset icon above the sunset time,
+both in a smaller font than the old combined value). Needed two new
+vendored icons -- Meteocons' `sunrise`/`sunset` (flat style, same MIT
+source as the rest of the set) -- with the same horizon-line recolor
+(`#202939` -> `#8b93a7`) already applied to keep it visible on the dark
+background.
+
+**A real, previously-latent bug surfaced while adding these**: Meteocons'
+`sunrise`/`sunset` artwork crops the sun to "peeking above/below the
+horizon" via an internal `<mask>`, referenced from inside the vendored
+`<symbol>` and instantiated via `<use>` in the page's icon sprite -- and
+that mask silently failed to apply in this exact setup (confirmed via a
+side-by-side render: the full sun with all 8 rays showed through
+completely uncropped, horizon line included, no visible masking effect at
+all). Switching the crop mechanism to an SVG `<clipPath>` didn't help
+either -- same failure. The other vendored icons that also use an internal
+mask (`partly-cloudy-day/night`, `thunderstorms-day/night`) happen to
+*look* correctly cropped anyway, but only by coincidence: their mask-cropped
+region is also covered by an opaque shape drawn on top afterward (the
+cloud), so whether the mask actually applied was never visually
+observable. This means the same latent bug likely affects those icons
+too, just invisibly.
+
+Fixed for `sunrise`/`sunset` by abandoning `<mask>`/`<clipPath>` entirely
+and baking the crop directly into the geometry instead: the sun's circle
+was replaced with a flat-bottomed dome path (an SVG arc closed with a
+straight chord at the horizon line's y-coordinate), and the three rays
+that would extend past the horizon (down, lower-left, lower-right) are
+simply omitted rather than drawn and clipped. No `url()` reference
+involved at all, so there's nothing left for this bug to affect.
+
+**Not yet fixed**: the same latent risk in the other masked icons. Since
+their coincidental correctness only holds as long as the covering shape
+(cloud) exactly matches the masked region, this is worth a closer look if
+those icons are ever revised -- see "Known risks" below.
+
 ### PWA: installable, standalone, no Safari chrome
 
 The user wanted to "Add to Home Screen" on the iPad and have it launch
@@ -323,6 +372,15 @@ service worker.
   mitigate, but still only provable on-device); whether the launched app is
   genuinely chrome-free/standalone; whether `black-translucent` looks right
   against this device's actual status bar.
+- **`partly-cloudy-day/night` and `thunderstorms-day/night` likely share
+  the same latent internal-`<mask>`-via-`<use>` bug found while building
+  the sunrise/sunset icons** (see above) -- their masks may be silently
+  failing exactly like sunrise/sunset's did, just masked (no pun intended)
+  by a coincidence of the artwork: the cloud shape drawn afterward happens
+  to cover the same region the mask was supposed to crop. Not yet fixed,
+  since it isn't visibly broken today -- worth converting to baked-in
+  geometry (like sunrise/sunset) if these icons are ever revised, rather
+  than trusting the coincidence to keep holding.
 
 ## Status
 
@@ -331,7 +389,8 @@ service worker.
 - [x] `usage_today.py`
 - [x] `temp_history.py`
 - [x] `render.py` (layout swap, battery, icons, sparkline + axis labels,
-      video fallback, PWA manifest/icons/meta tags)
+      video fallback, PWA manifest/icons/meta tags, hero reorder + top
+      margin, sunrise/sunset icons on the Sun card)
 - [x] `generate_dashboard.py`
 - [x] `weather_icons.py` + vendored `icons/*.svg` (Meteocons, flat style,
       MIT licensed, replacing the original NWS-hotlinked `<img>` icons)

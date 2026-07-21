@@ -6,6 +6,22 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.15] - 2026-07-21
+
+- Home dashboard layout tweaks: more top margin, outdoor temperature moved
+  to the middle of the hero row (between the rain/humidity stats and the
+  clock), and the Sun card now shows sunrise/sunset icons with the times
+  underneath instead of one combined text value.
+- Found and fixed a real bug while adding the sunrise/sunset icons: their
+  vendored artwork crops the sun via an internal SVG `<mask>`, which
+  silently fails to apply when referenced from inside a `<symbol>`
+  instantiated via `<use>` in this page's icon sprite. Fixed by baking the
+  horizon crop directly into the icon geometry instead of relying on
+  `<mask>`/`<clipPath>`. The same latent bug likely affects
+  `partly-cloudy-day/night` and `thunderstorms-day/night` too, just
+  invisibly (a cloud shape drawn on top happens to cover the same region) --
+  flagged in docs/home-dashboard.md as a known risk, not yet fixed there.
+
 ## [1.0.14] - 2026-07-21
 
 - Turn the home dashboard into an installable PWA: "Add to Home Screen" on
