@@ -6,6 +6,12 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.19] - 2026-07-23
+
+- Button-up-the-house warning: split the sub-label onto two lines
+  ("Outside is warmer" / "Button up the house") instead of one dash-joined
+  line -- there's plenty of room in the card for it.
+
 ## [1.0.18] - 2026-07-23
 
 - Add a "button up the house" warning: when the A/C is off and it's

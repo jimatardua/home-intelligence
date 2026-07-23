@@ -332,10 +332,11 @@ Indoor card's temperature (and its sub-label) turn red once it applies.
   different sensors, refreshed independently, and would otherwise cross
   back and forth right at parity from ordinary sensor noise.
 - The sub-label text swaps entirely when the flag is active ("Outside is
-  warmer -- button up the house") rather than showing the usual "Set to
-  Off (off)", which is true but useless -- the point of the enhancement is
-  actionable information, not just a color change with no explanation, so
-  other household members glancing at it understand *why* it's red.
+  warmer" / "Button up the house" on two lines -- there's room for it in
+  the card) rather than showing the usual "Set to Off (off)", which is
+  true but useless -- the point of the enhancement is actionable
+  information, not just a color change with no explanation, so other
+  household members glancing at it understand *why* it's red.
 
 ### PWA: installable, standalone, no Safari chrome
 

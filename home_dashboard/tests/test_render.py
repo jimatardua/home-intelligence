@@ -134,4 +134,4 @@ def test_render_html_indoor_temp_gets_warn_class_toggle_in_script():
     # message) made it into the rendered page at all.
     html = render_html(_minimal_context())
     assert "should_button_up_house" in html
-    assert "button up the house" in html
+    assert "Outside is warmer<br>Button up the house" in html

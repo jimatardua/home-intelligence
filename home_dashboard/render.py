@@ -446,8 +446,8 @@ function applyData(d) {{
   const hvac = d.hvac_action && d.hvac_action !== 'off' ? d.hvac_action : (d.hvac_mode || 'off');
   const thermostatSubEl = document.getElementById('thermostat-sub');
   thermostatSubEl.classList.toggle('warn', !!d.should_button_up_house);
-  thermostatSubEl.textContent = d.should_button_up_house
-    ? 'Outside is warmer -- button up the house'
+  thermostatSubEl.innerHTML = d.should_button_up_house
+    ? 'Outside is warmer<br>Button up the house'
     : 'Set to ' + d.thermostat_label + ' (' + hvac + ')';
 
   document.getElementById('sunrise-time').textContent = d.sunrise;
