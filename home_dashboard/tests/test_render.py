@@ -10,10 +10,11 @@ and is out of scope for this change.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from home_dashboard.render import BG_COLOR, DashboardContext, render_html, render_manifest_json
+from home_dashboard.render import BG_COLOR, DashboardContext, render_data_json, render_html, render_manifest_json
 
 TZ = ZoneInfo("America/Denver")
 
@@ -90,3 +91,47 @@ def test_render_html_viewport_has_viewport_fit_cover():
     # Required for env(safe-area-inset-*) to resolve to anything but 0.
     html = render_html(_minimal_context())
     assert "viewport-fit=cover" in html
+
+
+def _button_up_flag(ctx: DashboardContext) -> bool:
+    return json.loads(render_data_json(ctx))["should_button_up_house"]
+
+
+def test_button_up_house_true_when_ac_off_and_outside_warmer():
+    ctx = replace(_minimal_context(), hvac_mode="off", outdoor_temp_f=80.0, indoor_temp_f=75.0)
+    assert _button_up_flag(ctx) is True
+
+
+def test_button_up_house_false_when_ac_running():
+    # Same temperatures as above, but the A/C is actually on -- this is the
+    # "cool mode with a wide setpoint, waiting to kick in" situation, not
+    # the "windows open" situation the flag is meant to catch.
+    ctx = replace(_minimal_context(), hvac_mode="cool", outdoor_temp_f=80.0, indoor_temp_f=75.0)
+    assert _button_up_flag(ctx) is False
+
+
+def test_button_up_house_false_when_outside_cooler():
+    ctx = replace(_minimal_context(), hvac_mode="off", outdoor_temp_f=70.0, indoor_temp_f=75.0)
+    assert _button_up_flag(ctx) is False
+
+
+def test_button_up_house_false_within_margin():
+    # Outside is nominally warmer, but only by less than BUTTON_UP_MARGIN_F --
+    # within ordinary sensor noise, shouldn't flip the flag on.
+    ctx = replace(_minimal_context(), hvac_mode="off", outdoor_temp_f=75.5, indoor_temp_f=75.0)
+    assert _button_up_flag(ctx) is False
+
+
+def test_button_up_house_false_when_temps_missing():
+    ctx = replace(_minimal_context(), hvac_mode="off", outdoor_temp_f=None, indoor_temp_f=75.0)
+    assert _button_up_flag(ctx) is False
+    ctx = replace(_minimal_context(), hvac_mode="off", outdoor_temp_f=80.0, indoor_temp_f=None)
+    assert _button_up_flag(ctx) is False
+
+
+def test_render_html_indoor_temp_gets_warn_class_toggle_in_script():
+    # Smoke test that the client-side wiring (class toggle + fallback
+    # message) made it into the rendered page at all.
+    html = render_html(_minimal_context())
+    assert "should_button_up_house" in html
+    assert "button up the house" in html

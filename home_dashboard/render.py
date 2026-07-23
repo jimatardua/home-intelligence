@@ -29,6 +29,13 @@ CARD_COLOR = "#161b26"
 TEXT_COLOR = "#f2f4f8"
 MUTED_COLOR = "#8b93a7"
 ACCENT_COLOR = "#4da3ff"
+WARN_COLOR = "#ef4444"
+
+# "Free cooling" (A/C off, windows open) turns into free heating once it's
+# warmer outside than in -- this margin keeps the button-up-the-house
+# warning from flickering on/off from ordinary sensor noise right at the
+# crossover point, since the two readings come from different sensors.
+BUTTON_UP_MARGIN_F = 1.0
 
 # PWA home-screen icons (180x180 apple-touch-icon, 512x512 for manifest.json)
 # -- a sun glyph matching the vendored "clear-day" Meteocons icon's amber
@@ -153,6 +160,26 @@ def _thermostat_label(ctx: DashboardContext) -> str:
     return "--"
 
 
+def _should_button_up_house(ctx: DashboardContext) -> bool:
+    """True when the A/C is off and it's warmer outside than in.
+
+    The household's routine: turn the A/C off and open windows overnight
+    for free cooling, then close back up once outside catches up to (and
+    passes) the indoor temperature -- otherwise open windows start passively
+    heating the house instead. Gated on hvac_mode == "off" specifically
+    (not just hvac_action == "idle", which would also be true mid-cycle in
+    "cool" mode waiting for its setpoint -- a different, intentional
+    situation, not this one). Fails closed (False) on any missing reading,
+    matching this project's gap-aware convention elsewhere: no alert is
+    better than a false one built on absent data.
+    """
+    if ctx.hvac_mode != "off":
+        return False
+    if ctx.outdoor_temp_f is None or ctx.indoor_temp_f is None:
+        return False
+    return ctx.outdoor_temp_f > ctx.indoor_temp_f + BUTTON_UP_MARGIN_F
+
+
 def _data_dict(ctx: DashboardContext) -> dict:
     return {
         "generated_at": ctx.generated_at.isoformat(),
@@ -165,6 +192,7 @@ def _data_dict(ctx: DashboardContext) -> dict:
         "hvac_mode": ctx.hvac_mode,
         "hvac_action": ctx.hvac_action,
         "thermostat_label": _thermostat_label(ctx),
+        "should_button_up_house": _should_button_up_house(ctx),
         "sunrise": _fmt_time(ctx.sunrise),
         "sunset": _fmt_time(ctx.sunset),
         "usage_today_ac_kwh": ctx.usage_today_ac_kwh,
@@ -263,7 +291,9 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .card{{background:var(--card);border-radius:var(--r);padding:3vh 2vw}}
 .card .label{{font-size:min(2vw,13px);color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}}
 .card .value{{font-size:min(5vw,40px);font-weight:700}}
+.card .value.warn{{color:{WARN_COLOR}}}
 .card .sub{{font-size:min(2.2vw,15px);color:var(--muted);margin-top:6px}}
+.card .sub.warn{{color:{WARN_COLOR};font-weight:600}}
 .sun-row{{display:flex;justify-content:space-around;align-items:center}}
 .sun-item{{display:flex;flex-direction:column;align-items:center;gap:4px}}
 .sun-item svg.icon{{width:min(11vw,64px);height:min(11vw,64px)}}
@@ -409,9 +439,16 @@ function applyData(d) {{
   document.getElementById('rain-chance').textContent = currentPeriod ? currentPeriod.precip_probability_pct + '%' : '--';
   document.getElementById('humidity').textContent = d.outdoor_humidity_pct != null ? Math.round(d.outdoor_humidity_pct) + '%' : '--';
 
-  document.getElementById('indoor-temp').textContent = d.indoor_temp_f != null ? Math.round(d.indoor_temp_f) + '°' : '--';
+  const indoorTempEl = document.getElementById('indoor-temp');
+  indoorTempEl.textContent = d.indoor_temp_f != null ? Math.round(d.indoor_temp_f) + '°' : '--';
+  indoorTempEl.classList.toggle('warn', !!d.should_button_up_house);
+
   const hvac = d.hvac_action && d.hvac_action !== 'off' ? d.hvac_action : (d.hvac_mode || 'off');
-  document.getElementById('thermostat-sub').textContent = 'Set to ' + d.thermostat_label + ' (' + hvac + ')';
+  const thermostatSubEl = document.getElementById('thermostat-sub');
+  thermostatSubEl.classList.toggle('warn', !!d.should_button_up_house);
+  thermostatSubEl.textContent = d.should_button_up_house
+    ? 'Outside is warmer -- button up the house'
+    : 'Set to ' + d.thermostat_label + ' (' + hvac + ')';
 
   document.getElementById('sunrise-time').textContent = d.sunrise;
   document.getElementById('sunset-time').textContent = d.sunset;

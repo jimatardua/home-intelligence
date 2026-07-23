@@ -303,6 +303,40 @@ padding for correctness on any device. No JS change needed: the element
 kept its `id="battery"`, so `applyData()`'s existing update call didn't
 need to change, only where that element sits in the page.
 
+### "Button up the house" warning
+
+The household's actual routine: turn the A/C off and open windows
+overnight for free cooling, then at some point outside catches up to (and
+passes) the indoor temperature -- at which point open windows start
+passively *heating* the house instead, and it's time to close up and turn
+the A/C back on. Added a glanceable signal for exactly that moment: the
+Indoor card's temperature (and its sub-label) turn red once it applies.
+
+- **Condition, computed server-side**: `hvac_mode == "off"` AND
+  `outdoor_temp_f > indoor_temp_f + BUTTON_UP_MARGIN_F` (margin `1.0°F`,
+  a tunable constant in `render.py`) -- gated on the thermostat being
+  *off* specifically, not just `hvac_action == "idle"`, which would also
+  be true mid-cycle in `cool` mode with a wide setpoint waiting to kick
+  in -- a different, intentional situation, not this one.
+- **Computed in Python, not client-side JS**, so the actual trigger logic
+  (`_should_button_up_house()`) is unit-testable like everything else in
+  this project, rather than living only in untested JS. The client just
+  reads a plain `should_button_up_house` boolean from `data.json` and
+  toggles a CSS class -- no threshold duplicated in two languages.
+- **Fails closed on missing data**: if either temperature reading is
+  `None` (a sensor gap), the flag is `False` -- no alert is better than a
+  false one built on absent data, matching this project's gap-aware
+  convention everywhere else.
+- **The margin exists to avoid flicker**, not because the exact crossover
+  matters to the half-degree -- outdoor and indoor readings come from
+  different sensors, refreshed independently, and would otherwise cross
+  back and forth right at parity from ordinary sensor noise.
+- The sub-label text swaps entirely when the flag is active ("Outside is
+  warmer -- button up the house") rather than showing the usual "Set to
+  Off (off)", which is true but useless -- the point of the enhancement is
+  actionable information, not just a color change with no explanation, so
+  other household members glancing at it understand *why* it's red.
+
 ### PWA: installable, standalone, no Safari chrome
 
 The user wanted to "Add to Home Screen" on the iPad and have it launch
@@ -407,14 +441,15 @@ service worker.
 - [x] `temp_history.py`
 - [x] `render.py` (layout swap, battery, icons, sparkline + axis labels,
       video fallback, PWA manifest/icons/meta tags, hero reorder + top
-      margin, sunrise/sunset icons on the Sun card)
+      margin, sunrise/sunset icons on the Sun card, button-up-the-house
+      warning)
 - [x] `generate_dashboard.py`
 - [x] `weather_icons.py` + vendored `icons/*.svg` (Meteocons, flat style,
       MIT licensed, replacing the original NWS-hotlinked `<img>` icons)
 - [x] PWA: `manifest.json`, `apple-touch-icon.png`, `icon-512.png` --
       installable/standalone on iOS, no service worker (see "PWA" above)
-- [x] Unit tests (47 passing in `home_dashboard`, 62 in `energy_report` --
-      109 total across both packages)
+- [x] Unit tests (53 passing in `home_dashboard`, 62 in `energy_report` --
+      115 total across both packages)
 - [x] `deploy.sh`
 - [x] Deployed to domus and verified end-to-end (cron entry live, nginx
       location added, `ha-proxy` container recreated with the new bind

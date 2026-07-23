@@ -6,6 +6,15 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.18] - 2026-07-23
+
+- Add a "button up the house" warning: when the A/C is off and it's
+  gotten warmer outside than in (free overnight cooling turning into free
+  heating), the Indoor card's temperature and sub-label turn red with an
+  actionable message. Computed server-side (`_should_button_up_house()`,
+  unit-tested) rather than in client JS, with a tunable 1°F margin to
+  avoid flicker from sensor noise right at the crossover point.
+
 ## [1.0.17] - 2026-07-21
 
 - Move the Eve Weather battery indicator from under the outdoor temp (now
