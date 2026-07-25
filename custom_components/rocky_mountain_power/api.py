@@ -41,10 +41,19 @@ a non-async library.
 Both auth layers (session + crypto handshake) are established together at
 login and treated as one unit: `ensure_authenticated()` is the single gate
 every public method calls before doing anything else. Any caller that hits
-a session or crypto failure calls `_invalidate_session()`, which forces a
-fresh login (and fresh handshake) on the *next* call -- there is no in-call
+a session or crypto failure -- including a failed login itself -- calls
+`_invalidate_session()`, which discards the underlying `requests.Session`
+(cookies included) and crypto state entirely, so the *next* call builds a
+genuinely fresh session and logs in from scratch. There is no in-call
 retry loop by design, so failures surface immediately and self-heal on the
-next poll.
+next poll -- but that self-heal is only real if the discarded session is
+actually thrown away, not just flagged. An earlier version only set a
+`force_relogin` flag and kept reusing the same session/cookie jar, which
+meant a session that had gone genuinely bad could never recover on its
+own: confirmed live when RMP's login endpoint rejected fully correct,
+unchanged credentials for 11 straight days on the same long-lived session,
+and a manual integration reload (building a truly fresh session) fixed it
+immediately. See docs/rmp-integration.md.
 """
 
 from __future__ import annotations
@@ -195,8 +204,28 @@ class RockyMountainPowerClient:
         return self._cached_agreement
 
     def _invalidate_session(self) -> None:
-        LOGGER.debug("Invalidating session; next call will force a fresh login")
-        self._auth.force_relogin = True
+        """Discard the session, crypto state, and cached agreement entirely.
+
+        An earlier version of this only set `force_relogin = True`, which
+        forced a *login attempt* on the next call but reused the exact
+        same `requests.Session`/cookie jar -- so a session that had
+        actually gone bad could never really recover: every subsequent
+        daily poll kept retrying on the same poisoned session and failing
+        identically, for 11 real days straight, until a manual Home
+        Assistant integration reload (which does build a genuinely fresh
+        client/session) fixed it immediately with the *same unchanged*
+        credentials. That live incident confirmed the credentials were
+        never the problem -- the session object itself was. Recreating it
+        here, not just flagging it, is what actually makes "self-heals on
+        the next call" true rather than aspirational. See
+        docs/rmp-integration.md.
+        """
+        LOGGER.debug("Invalidating session -- discarding session/crypto state, next call re-authenticates")
+        self._session.close()
+        self._session = requests.Session()
+        self._crypto = None
+        self._cached_agreement = None
+        self._auth = _AuthState()
 
     def ensure_authenticated(self) -> None:
         """Gate every public API call. Logs in only if actually needed."""
@@ -288,10 +317,15 @@ class RockyMountainPowerClient:
             self._cached_agreement = None  # re-resolve under the new session
             LOGGER.info("Rocky Mountain Power login successful")
         except InvalidAuth:
-            self._auth.authenticated = False
+            # Discard the session now, not just an auth flag -- a rejected
+            # login can mean the session itself has gone bad (see
+            # _invalidate_session()'s docstring), and the *next* login
+            # attempt (tomorrow's poll) must not retry on the same
+            # poisoned session or it will just fail identically again.
+            self._invalidate_session()
             raise
         except requests.RequestException as err:
-            self._auth.authenticated = False
+            self._invalidate_session()
             raise CannotConnect(f"Network error during login: {err}") from err
 
     def _fetch_bundle_signature(self) -> str | None:

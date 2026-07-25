@@ -6,6 +6,22 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.20] - 2026-07-25
+
+- Harden the Rocky Mountain Power integration against a real production
+  incident: a stale login session that couldn't self-heal on its own,
+  causing the archive to silently stop updating for 11 days until a
+  manual integration reload fixed it (with unchanged credentials,
+  confirming the session -- not the password -- was the problem).
+  `_invalidate_session()` now actually discards the HTTP session, crypto
+  handshake state, and cached agreement, rather than only setting a flag
+  that let every subsequent poll keep retrying on the same poisoned
+  session. `_login()`'s own failure paths now call it too, so a failed
+  login itself (not just a later mid-session failure) guarantees the next
+  scheduled poll starts genuinely fresh. Added mocked unit tests
+  (`custom_components/rocky_mountain_power/tests/test_api.py`) --
+  previously this component had no automated test coverage at all.
+
 ## [1.0.19] - 2026-07-23
 
 - Button-up-the-house warning: split the sub-label onto two lines

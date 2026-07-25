@@ -206,6 +206,52 @@ Raw JSON archive (one file per day)
 3. Once set up, the new statistic becomes selectable in Settings →
    Dashboards → Energy → "Grid consumption".
 
+## Real incident: a session can go stale and never self-heal on its own
+
+Found live, 2026-07: the archive stopped updating for several days. HA's
+logs showed the login itself failing --
+
+```
+Authentication failed: SelfAsserted rejected credentials:
+{'status': '400', 'errorCode': 'AADB2C90278', 'message': 'Unable to
+validate the information provided.'}
+```
+
+-- which reads exactly like a wrong username/password. It wasn't: the
+credentials were confirmed unchanged, and a manual **Reload** of the
+integration in Home Assistant (Settings → Devices & Services →
+Rocky Mountain Power → ⋮ → Reload) fixed it immediately, with the exact
+same stored credentials, no re-entry.
+
+Reload works because `async_setup_entry` builds a brand-new
+`RockyMountainPowerClient` (and its underlying `requests.Session`) from
+scratch. That pointed at the actual bug: the coordinator holds **one**
+client/session for its entire lifetime, and while `_secure_post()` already
+called `_invalidate_session()` on a suspicious response, that method only
+set a `force_relogin` flag -- the next login attempt still reused the
+exact same (by then apparently poisoned, possibly WAF-related) session and
+cookie jar, and kept failing identically. Worse, a failure *inside*
+`_login()` itself (this incident) never called `_invalidate_session()` at
+all, so nothing about the client's state changed between one failed daily
+poll and the next -- there was no path back to a working state without
+manual intervention. This had been running for 11 days before it was
+caught.
+
+**Fixed** by making `_invalidate_session()` actually discard the session
+(`requests.Session.close()` + a fresh one), plus the crypto handshake
+state and cached agreement that were implicitly tied to it, and calling it
+from `_login()`'s own failure paths (previously it only touched an
+`authenticated` flag). The existing "no in-call retry loop, self-heals on
+the next poll" design (see api.py's module docstring) is unchanged and was
+the right call to keep -- retrying immediately within the same poll risks
+looking more bot-like to RMP's WAF than naturally-spaced daily attempts.
+What was missing was making the *next* poll's self-heal promise actually
+true, which it wasn't: reusing a poisoned session meant "the next call"
+could fail forever, not just once. Covered by
+`custom_components/rocky_mountain_power/tests/test_api.py` (mocked, no
+live credentials -- see that file's docstring for the unusual pytest
+invocation it needs to avoid importing `__init__.py`'s HA dependency).
+
 ## Known risks / things to watch
 
 - **This is unofficial and unsupported.** RMP can change their frontend,
