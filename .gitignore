@@ -3,5 +3,6 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+.build/
 rmp/poc_output.txt
 rmp/poc_encrypted_output.txt

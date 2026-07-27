@@ -6,6 +6,32 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.21] - 2026-07-27
+
+- Add native Alexa Smart Home support for the family room LG webOS TV
+  (55UM7300AUE): "turn on/off the TV," "mute the TV," and per-app launching
+  for Netflix/Plex/Prime Video/Apple TV/YouTube TV/antenna now work via Home
+  Assistant's local `webostv` integration plus HA's free, self-hosted Alexa
+  Smart Home Skill -- not Nabu Casa, not LG's own unusable cloud skill.
+  `media_player.tv` (a Universal Media Player) wraps the real `webostv`
+  entity to add a working `turn_on` via Wake-on-LAN, which the underlying
+  integration doesn't support on its own; seven scripts handle per-app
+  launching, exposed to Alexa as scenes. New `alexa_smart_home_bridge/`
+  package (AWS Lambda, 9 passing tests) bridges Alexa's directives to HA's
+  API; the Lambda, IAM role, and Alexa skill (endpoint + account linking)
+  are deployed/configured. Required a public-reachability change in the
+  `infrastructure` repo (handoff in `docs/infra-handoff-alexa-lg-tv.md`),
+  now complete -- `domus.ardua.com` is publicly reachable through the
+  existing local `ha-proxy`, no HA-side proxy-trust config needed.
+  Found live, not anticipated going in: Alexa's own built-in recognition of
+  major media/content brand names intercepts scene names that exactly match
+  one (Netflix, Plex, Prime Video, YouTube TV, and "Live TV") regardless of
+  phrasing, before the request ever reaches HA -- fixed by renaming those
+  five scenes to a "___ Mode" pattern; "Apple TV" was unaffected and kept
+  its original name, with an added "Apple Mode" alias script for naming
+  consistency. Verified end-to-end with real Alexa voice commands for every
+  target phrase. Full writeup in `docs/alexa-lg-tv.md`.
+
 ## [1.0.20] - 2026-07-25
 
 - Harden the Rocky Mountain Power integration against a real production
