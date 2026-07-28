@@ -40,6 +40,42 @@ def _metadata_id(conn: sqlite3.Connection, entity_id: str) -> int | None:
     return row[0] if row else None
 
 
+def _state_at_or_before(conn: sqlite3.Connection, entity_id: str, at: datetime) -> str | None:
+    """Most recent raw state at or before `at`, or None if none exists.
+
+    Unlike get_latest_state() (always "now"), this answers "what was the
+    state as of this specific past instant" -- needed because
+    _state_changes() only returns rows strictly inside [start, end), so an
+    entity that's held the same state since before that window (e.g. a car
+    parked in the carport for days without a new tracker row, since HA only
+    writes a row when a state actually changes) would otherwise look like
+    it never happened at all for the entire window.
+    """
+    metadata_id = _metadata_id(conn, entity_id)
+    if metadata_id is None:
+        return None
+    row = conn.execute(
+        """
+        SELECT state FROM states
+        WHERE metadata_id = ? AND last_updated_ts <= ?
+        ORDER BY last_updated_ts DESC LIMIT 1
+        """,
+        (metadata_id, at.timestamp()),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _numeric_value_at_or_before(conn: sqlite3.Connection, entity_id: str, at: datetime) -> float | None:
+    """Same as _state_at_or_before(), but parsed as a number (gap-safe)."""
+    raw = _state_at_or_before(conn, entity_id, at)
+    if raw is None or raw.lower() in _GAP_STATES:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 def _to_local(ts: float, tz: ZoneInfo = LOCAL_TZ) -> datetime:
     return datetime.fromtimestamp(ts, tz=tz)
 
@@ -99,6 +135,48 @@ def get_binary_sensor_intervals(
         intervals.append(
             OnOffInterval(start_local=change.at_local, end_local=span_end, is_on=state == "on")
         )
+    return intervals
+
+
+@dataclass(frozen=True)
+class ZoneInterval:
+    """A span of time a device_tracker held one zone state (lowercased)."""
+
+    start_local: datetime
+    end_local: datetime
+    zone: str  # e.g. "carport", "home", "not_home" -- never a gap state
+
+
+def get_device_tracker_zone_intervals(
+    conn: sqlite3.Connection, entity_id: str, start: datetime, end: datetime
+) -> list[ZoneInterval]:
+    """Reconstruct zone-membership intervals for a device_tracker between start/end.
+
+    Same reconstruction as get_binary_sensor_intervals(), but keeps the raw
+    zone string (lowercased) instead of collapsing to on/off, since
+    device_tracker has more than two meaningful states ("home", "not_home",
+    any zone name, or a gap). Entity-id-agnostic -- not specific to any
+    particular zone; callers filter for the zone they care about.
+
+    Anchors on the state in effect at `start` itself (via
+    _state_at_or_before()) when there's no change exactly at `start` --
+    otherwise a device that's held the same state since before the window
+    would show zero coverage for the entire window, which is wrong for the
+    common case of a car parked somewhere for days without a new row.
+    """
+    changes = _state_changes(conn, entity_id, start, end)
+    if not changes or changes[0].at_local != start:
+        anchor_state = _state_at_or_before(conn, entity_id, start)
+        if anchor_state is not None:
+            changes = [StateChange(at_local=start, state=anchor_state)] + changes
+
+    intervals: list[ZoneInterval] = []
+    for change, next_change in zip(changes, changes[1:] + [None]):
+        span_end = next_change.at_local if next_change else end
+        state = change.state.lower()
+        if state in _GAP_STATES:
+            continue
+        intervals.append(ZoneInterval(start_local=change.at_local, end_local=span_end, zone=state))
     return intervals
 
 
@@ -218,3 +296,109 @@ def get_latest_attributes(conn: sqlite3.Connection, entity_id: str) -> dict:
         return json.loads(row[0])
     except json.JSONDecodeError:
         return {}
+
+
+def get_gated_temperature_samples(
+    conn: sqlite3.Connection,
+    sources: dict[str, tuple[str, str]],
+    zone: str,
+    start: datetime,
+    end: datetime,
+) -> list[NumericSample]:
+    """Ambient temperature reconstructed from N zone-gated sensors.
+
+    `sources` maps an arbitrary label to (temperature_entity_id,
+    tracker_entity_id) pairs. Each source's temperature only counts while
+    its own device_tracker reports being in `zone`. When more than one
+    source is present at a given instant, their (non-gap) values are
+    averaged; when none are present, or the present source(s) all have a
+    gap reading at that instant, the sample's value is None -- an explicit
+    gap, never a fabricated value, same convention as the rest of this
+    module.
+
+    Correlates two independently-timestamped signals (zone membership,
+    temperature updates) via an event-driven merge: computes one output
+    sample at every timestamp where the gated value could change (a zone
+    entry, exit, or a temperature update while already inside the zone),
+    using zero-order-hold to look up each present source's temperature at
+    that instant (the same assumption disaggregation.py's EV-charging
+    integration already makes for charger power between samples).
+
+    Both the zone intervals and the temperature history are anchored at
+    `start` (via get_device_tracker_zone_intervals()'s and this function's
+    own as-of-start lookups), so a source that's been in `zone` since
+    before the window opened is still correctly recognized as present from
+    `start` onward, not treated as a false gap.
+    """
+    zone_lc = zone.lower()
+
+    per_car_intervals: dict[str, list[ZoneInterval]] = {}
+    per_car_temps: dict[str, list[NumericSample]] = {}
+    for car, (temp_entity, tracker_entity) in sources.items():
+        per_car_intervals[car] = [
+            iv
+            for iv in get_device_tracker_zone_intervals(conn, tracker_entity, start, end)
+            if iv.zone == zone_lc
+        ]
+
+        temps = get_numeric_sensor_samples(conn, temp_entity, start, end)
+        if not temps or temps[0].at_local != start:
+            anchor_value = _numeric_value_at_or_before(conn, temp_entity, start)
+            temps = [NumericSample(at_local=start, value=anchor_value)] + temps
+        per_car_temps[car] = temps
+
+    def present_at(car: str, t: datetime) -> bool:
+        return any(iv.start_local <= t < iv.end_local for iv in per_car_intervals[car])
+
+    def value_at(car: str, t: datetime) -> float | None:
+        value = None
+        for s in per_car_temps[car]:
+            if s.at_local > t:
+                break
+            value = s.value
+        return value
+
+    def gated_value_at(t: datetime) -> float | None:
+        present_values = [value_at(car, t) for car in sources if present_at(car, t)]
+        real = [v for v in present_values if v is not None]
+        return sum(real) / len(real) if real else None
+
+    event_times = {start}
+    for car in sources:
+        for iv in per_car_intervals[car]:
+            if start <= iv.start_local < end:
+                event_times.add(iv.start_local)
+            if start <= iv.end_local < end:
+                event_times.add(iv.end_local)
+        for s in per_car_temps[car]:
+            if start <= s.at_local < end and present_at(car, s.at_local):
+                event_times.add(s.at_local)
+
+    return [NumericSample(at_local=t, value=gated_value_at(t)) for t in sorted(event_times)]
+
+
+def get_current_gated_temperature(
+    conn: sqlite3.Connection, sources: dict[str, tuple[str, str]], zone: str
+) -> float | None:
+    """Current ambient temperature from whichever gated source(s) are
+    presently in `zone`, averaged if more than one.
+
+    Built on get_latest_state() (most-recent-only, unbounded lookback) --
+    not the windowed reconstruction above -- because a source that's been
+    in `zone` for hours without a new tracker row must still read as
+    present, not as a gap the way a narrow recent time window would.
+    """
+    zone_lc = zone.lower()
+    present_values: list[float] = []
+    for temp_entity, tracker_entity in sources.values():
+        zone_state = get_latest_state(conn, tracker_entity)
+        if zone_state is None or zone_state.lower() != zone_lc:
+            continue
+        temp_state = get_latest_state(conn, temp_entity)
+        if temp_state is None:
+            continue
+        try:
+            present_values.append(float(temp_state))
+        except ValueError:
+            continue
+    return sum(present_values) / len(present_values) if present_values else None

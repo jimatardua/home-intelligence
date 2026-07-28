@@ -41,6 +41,24 @@ def _minimal_context() -> DashboardContext:
     )
 
 
+def test_data_json_includes_carport_temp_f_when_present():
+    ctx = replace(_minimal_context(), carport_temp_f=78.0)
+    data = json.loads(render_data_json(ctx))
+    assert data["carport_temp_f"] == 78.0
+
+
+def test_data_json_carport_temp_f_defaults_to_none():
+    data = json.loads(render_data_json(_minimal_context()))
+    assert data["carport_temp_f"] is None
+
+
+def test_render_html_includes_carport_temp_placeholder_element():
+    # The hero annotation is a static, always-present container populated
+    # client-side by applyData() -- present/empty regardless of value.
+    html = render_html(_minimal_context())
+    assert 'id="carport-temp"' in html
+
+
 def test_manifest_is_valid_json_with_expected_keys():
     manifest = json.loads(render_manifest_json())
     assert manifest["name"] == "Home"

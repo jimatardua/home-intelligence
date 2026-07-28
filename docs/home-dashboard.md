@@ -101,7 +101,11 @@ RMP's actual meter reading to know.
   against "now" instead of the RMP archive's lagging dates
 - `temp_history.py` -- last-12h outdoor temperature readings for the
   sparkline, reusing `get_numeric_sensor_samples()` directly (same reader,
-  different time window than the current-value read)
+  different time window than the current-value read); also
+  `get_current_carport_temp()`, the current south-side/carport reading
+  (from whichever Tesla is presently parked there), a thin wrapper over
+  `energy_report.ha_recorder`'s `get_current_gated_temperature()` -- see
+  "Carport temperature" below
 - `render.py` -- HTML/CSS/JS shell + `data.json`/`manifest.json` builder,
   plus the base64-embedded PWA icon constants
 - `generate_dashboard.py` -- CLI entry point; every cron run atomically
@@ -137,6 +141,8 @@ missing data, never fabricated) as every other reader in that module.
    `/energy-report/` one.
 5. Recreate (not restart) the `ha-proxy` container with one more bind
    mount for this package's output directory.
+6. The "Carport" HA zone -- same one-time prerequisite as
+   `docs/tou-report.md`'s Setup step, shared by both packages.
 
 ## Visual iteration (after first deploy, based on user feedback)
 
@@ -393,6 +399,30 @@ service worker.
   block already serves; nginx's default `mime.types` already maps
   `.json`/`.png` correctly. Confirmed live via `curl`, not just assumed.
 
+### Carport temperature annotation
+
+A second, independent outdoor-temperature reading -- see
+`docs/tou-report.md`'s fuller writeup for the why (the north-side Eve
+sensor runs warm from patio radiant heat; the carport gets no direct sun
+and is a confirmed-good ambient proxy from a parked Tesla's own sensor,
+gated by a new HA "Carport" zone). This dashboard only needs the *current*
+reading (`get_current_carport_temp()`, built on
+`get_current_gated_temperature()`), not a historical series.
+
+**Placement: a small annotation under the existing hero temperature, not a
+new tile or a second sparkline.** A persistent fourth card in the existing
+Indoor/Sun/Usage row would show blank most of the time -- a car is only in
+the carport occasionally -- wasting always-on display space the current
+3-card row doesn't otherwise waste. A second sparkline series would also
+fight the hand-rolled SVG's single-series auto-scaling for an
+intermittently-present line, for little gain, since the real "does the
+carport reading track the house reading over time" comparison already
+lives properly in the TOU report's chart (its own axis, tooltip, and
+gap-handling already built there). The whole point of this reading is to
+contextualize the north sensor's known warm bias, so placing it directly
+under that number -- and having it simply disappear when no car is present,
+rather than showing a placeholder -- is the more directly useful choice.
+
 ## Known risks / things to watch
 
 - **A/C + EV usage today is an estimate of exactly those two loads, not
@@ -433,6 +463,10 @@ service worker.
   since it isn't visibly broken today -- worth converting to baked-in
   geometry (like sunrise/sunset) if these icons are ever revised, rather
   than trusting the coincidence to keep holding.
+- **The carport temperature annotation is intermittent by nature** -- it's
+  blank whenever neither car is parked there, which is expected, not a bug.
+  Depends on the same "Carport" HA zone as the TOU report's south-side
+  series; see that doc's known-risks for the zone-radius caveat.
 
 ## Status
 
@@ -449,9 +483,12 @@ service worker.
       MIT licensed, replacing the original NWS-hotlinked `<img>` icons)
 - [x] PWA: `manifest.json`, `apple-touch-icon.png`, `icon-512.png` --
       installable/standalone on iOS, no service worker (see "PWA" above)
-- [x] Unit tests (53 passing in `home_dashboard`, 62 in `energy_report` --
-      115 total across both packages)
+- [x] Unit tests (59 passing in `home_dashboard`, 88 in `energy_report` --
+      147 total across both packages)
 - [x] `deploy.sh`
+- [x] Carport temperature annotation (`get_current_carport_temp()` in
+      `temp_history.py`, hero placement in `render.py`) -- see "Carport
+      temperature annotation" above
 - [x] Deployed to domus and verified end-to-end (cron entry live, nginx
       location added, `ha-proxy` container recreated with the new bind
       mount, confirmed live via `curl` against `index.html`, `data.json`,

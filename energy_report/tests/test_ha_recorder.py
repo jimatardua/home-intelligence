@@ -17,6 +17,9 @@ import pytest
 
 from energy_report.ha_recorder import (
     get_binary_sensor_intervals,
+    get_current_gated_temperature,
+    get_device_tracker_zone_intervals,
+    get_gated_temperature_samples,
     get_latest_attributes,
     get_latest_state,
     get_numeric_sensor_samples,
@@ -217,3 +220,261 @@ def test_get_latest_attributes_no_attributes_row_returns_empty_dict(conn):
 def test_get_latest_attributes_unknown_entity_returns_empty_dict(conn):
     conn.commit()
     assert get_latest_attributes(conn, "climate.does_not_exist") == {}
+
+
+# --- get_device_tracker_zone_intervals ------------------------------------
+
+
+def test_zone_intervals_basic_entry_and_exit(conn):
+    _add_entity(conn, 10, "device_tracker.jim_s_tesla_location")
+    _add_state(conn, 10, "not_home", _dt(9))
+    _add_state(conn, 10, "Carport", _dt(10))
+    _add_state(conn, 10, "not_home", _dt(14))
+    conn.commit()
+
+    intervals = get_device_tracker_zone_intervals(
+        conn, "device_tracker.jim_s_tesla_location", _dt(8), _dt(15)
+    )
+    carport = [iv for iv in intervals if iv.zone == "carport"]
+    assert len(carport) == 1
+    assert carport[0].start_local == _dt(10)
+    assert carport[0].end_local == _dt(14)
+
+
+def test_zone_intervals_gap_state_produces_no_interval(conn):
+    _add_entity(conn, 10, "device_tracker.jim_s_tesla_location")
+    _add_state(conn, 10, "carport", _dt(10))
+    _add_state(conn, 10, "unavailable", _dt(11))
+    _add_state(conn, 10, "not_home", _dt(12))
+    conn.commit()
+
+    intervals = get_device_tracker_zone_intervals(
+        conn, "device_tracker.jim_s_tesla_location", _dt(9), _dt(13)
+    )
+    assert any(iv.zone == "carport" and iv.start_local == _dt(10) and iv.end_local == _dt(11) for iv in intervals)
+    assert not any(iv.start_local == _dt(11) for iv in intervals)
+
+
+def test_zone_intervals_unknown_entity_returns_empty(conn):
+    conn.commit()
+    assert get_device_tracker_zone_intervals(conn, "device_tracker.does_not_exist", _dt(9), _dt(15)) == []
+
+
+def test_zone_intervals_preserves_arbitrary_zone_name(conn):
+    # Not carport-specific -- any zone name is passed through verbatim.
+    _add_entity(conn, 10, "device_tracker.jim_s_tesla_location")
+    _add_state(conn, 10, "Work", _dt(10))
+    conn.commit()
+
+    intervals = get_device_tracker_zone_intervals(
+        conn, "device_tracker.jim_s_tesla_location", _dt(9), _dt(12)
+    )
+    assert intervals[0].zone == "work"
+
+
+def test_zone_intervals_anchors_on_state_already_in_effect_at_start(conn):
+    # The car entered the carport well before the query window opens, and
+    # never changes state again within the window -- _state_changes() alone
+    # would see zero rows in [start, end) and report no coverage at all.
+    # This is the common "parked overnight" case, not a rare edge case.
+    _add_entity(conn, 10, "device_tracker.jim_s_tesla_location")
+    _add_state(conn, 10, "not_home", _dt(0))
+    _add_state(conn, 10, "carport", _dt(2))  # well before the window below
+    conn.commit()
+
+    intervals = get_device_tracker_zone_intervals(
+        conn, "device_tracker.jim_s_tesla_location", _dt(10), _dt(14)
+    )
+    carport = [iv for iv in intervals if iv.zone == "carport"]
+    assert len(carport) == 1
+    assert carport[0].start_local == _dt(10)  # anchored at window start, not at dt(2)
+    assert carport[0].end_local == _dt(14)
+
+
+def test_zone_intervals_no_anchor_added_when_change_already_at_start(conn):
+    # If a real state change happens to land exactly at `start`, no
+    # duplicate/zero-width anchor interval should be introduced.
+    _add_entity(conn, 10, "device_tracker.jim_s_tesla_location")
+    _add_state(conn, 10, "not_home", _dt(9))
+    _add_state(conn, 10, "carport", _dt(10))
+    conn.commit()
+
+    intervals = get_device_tracker_zone_intervals(
+        conn, "device_tracker.jim_s_tesla_location", _dt(10), _dt(12)
+    )
+    assert len(intervals) == 1
+    assert intervals[0].zone == "carport"
+    assert intervals[0].start_local == _dt(10)
+
+
+# --- get_gated_temperature_samples -----------------------------------------
+
+CARPORT_SOURCES = {
+    "jim": ("sensor.jim_s_tesla_outside_temperature", "device_tracker.jim_s_tesla_location"),
+    "irina": ("sensor.irina_s_tesla_outside_temperature", "device_tracker.irina_s_tesla_location"),
+}
+
+
+def _setup_car(conn, temp_id, tracker_id, temp_states, tracker_states):
+    _add_entity(conn, temp_id, CARPORT_SOURCES["jim"][0] if temp_id == 20 else CARPORT_SOURCES["irina"][0])
+    for state, at in temp_states:
+        _add_state(conn, temp_id, state, at)
+    _add_entity(conn, tracker_id, CARPORT_SOURCES["jim"][1] if tracker_id == 21 else CARPORT_SOURCES["irina"][1])
+    for state, at in tracker_states:
+        _add_state(conn, tracker_id, state, at)
+
+
+def test_gated_temperature_single_car_gated_by_its_own_presence(conn):
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("not_home", _dt(9)), ("carport", _dt(10)), ("not_home", _dt(13))])
+    _add_entity(conn, 22, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 23, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 23, "not_home", _dt(9))
+    conn.commit()
+
+    samples = get_gated_temperature_samples(conn, CARPORT_SOURCES, "carport", _dt(9), _dt(14))
+    at_10 = [s for s in samples if s.at_local == _dt(10)][0]
+    at_13 = [s for s in samples if s.at_local == _dt(13)][0]
+    assert at_10.value == 80.0
+    assert at_13.value is None
+
+
+def test_gated_temperature_both_cars_present_averages(conn):
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("carport", _dt(9))])
+    _setup_car(conn, 22, 23, [("84.0", _dt(9))], [("carport", _dt(9))])
+    conn.commit()
+
+    samples = get_gated_temperature_samples(conn, CARPORT_SOURCES, "carport", _dt(9), _dt(12))
+    assert samples[0].value == 82.0
+
+
+def test_gated_temperature_one_present_uses_that_cars_value_only(conn):
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("carport", _dt(9))])
+    _setup_car(conn, 22, 23, [("84.0", _dt(9))], [("not_home", _dt(9))])
+    conn.commit()
+
+    samples = get_gated_temperature_samples(conn, CARPORT_SOURCES, "carport", _dt(9), _dt(12))
+    assert samples[0].value == 80.0
+
+
+def test_gated_temperature_neither_present_is_gap_throughout(conn):
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("not_home", _dt(9))])
+    _setup_car(conn, 22, 23, [("84.0", _dt(9))], [("work", _dt(9))])
+    conn.commit()
+
+    samples = get_gated_temperature_samples(conn, CARPORT_SOURCES, "carport", _dt(9), _dt(12))
+    assert all(s.value is None for s in samples)
+
+
+def test_gated_temperature_present_cars_gap_reading_excluded_not_fabricated(conn):
+    # Jim is present but his temp sensor is gap-state right now; Irina is
+    # also present and has a real reading -- result must be Irina's real
+    # value alone, not None and not a fabricated blend with a missing value.
+    _setup_car(conn, 20, 21, [("unknown", _dt(9))], [("carport", _dt(9))])
+    _setup_car(conn, 22, 23, [("84.0", _dt(9))], [("carport", _dt(9))])
+    conn.commit()
+
+    samples = get_gated_temperature_samples(conn, CARPORT_SOURCES, "carport", _dt(9), _dt(12))
+    assert samples[0].value == 84.0
+
+
+def test_gated_temperature_both_present_both_gap_is_none(conn):
+    _setup_car(conn, 20, 21, [("unknown", _dt(9))], [("carport", _dt(9))])
+    _setup_car(conn, 22, 23, [("unavailable", _dt(9))], [("carport", _dt(9))])
+    conn.commit()
+
+    samples = get_gated_temperature_samples(conn, CARPORT_SOURCES, "carport", _dt(9), _dt(12))
+    assert samples[0].value is None
+
+
+def test_gated_temperature_anchors_presence_that_began_before_window(conn):
+    # Jim entered the carport well before `start` and hasn't left -- the
+    # reported temperature should be available from `start` onward, not a
+    # false gap for however long ago the car actually arrived.
+    _setup_car(conn, 20, 21, [("79.0", _dt(1))], [("carport", _dt(2))])
+    _add_entity(conn, 22, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 23, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 23, "not_home", _dt(1))
+    conn.commit()
+
+    samples = get_gated_temperature_samples(conn, CARPORT_SOURCES, "carport", _dt(10), _dt(14))
+    assert samples[0].at_local == _dt(10)
+    assert samples[0].value == 79.0
+
+
+def test_gated_temperature_update_while_elsewhere_still_carries_forward_once_present(conn):
+    # A temp update fires at dt(10) while Jim is confirmed elsewhere (not an
+    # event that should change the gated output then), but that value must
+    # still be the one used via zero-order-hold once he later enters the
+    # carport at dt(12), rather than being lost.
+    _setup_car(
+        conn,
+        20,
+        21,
+        [("70.0", _dt(9)), ("77.0", _dt(10))],
+        [("not_home", _dt(9)), ("carport", _dt(12))],
+    )
+    _add_entity(conn, 22, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 23, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 23, "not_home", _dt(9))
+    conn.commit()
+
+    samples = get_gated_temperature_samples(conn, CARPORT_SOURCES, "carport", _dt(9), _dt(14))
+    assert not any(s.at_local == _dt(10) for s in samples)  # not a spurious event
+    at_12 = [s for s in samples if s.at_local == _dt(12)][0]
+    assert at_12.value == 77.0
+
+
+def test_gated_temperature_unrecognized_zone_yields_all_gap(conn):
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("carport", _dt(9))])
+    _add_entity(conn, 22, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 23, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 23, "not_home", _dt(9))
+    conn.commit()
+
+    samples = get_gated_temperature_samples(conn, CARPORT_SOURCES, "garage", _dt(9), _dt(12))
+    assert all(s.value is None for s in samples)
+
+
+# --- get_current_gated_temperature ------------------------------------------
+
+
+def test_current_gated_temperature_present_car_resolves(conn):
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("carport", _dt(9))])
+    _add_entity(conn, 22, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 23, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 23, "not_home", _dt(9))
+    conn.commit()
+
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport") == 80.0
+
+
+def test_current_gated_temperature_both_present_averages(conn):
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("carport", _dt(9))])
+    _setup_car(conn, 22, 23, [("84.0", _dt(9))], [("carport", _dt(9))])
+    conn.commit()
+
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport") == 82.0
+
+
+def test_current_gated_temperature_neither_present_is_none(conn):
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("not_home", _dt(9))])
+    _setup_car(conn, 22, 23, [("84.0", _dt(9))], [("work", _dt(9))])
+    conn.commit()
+
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport") is None
+
+
+def test_current_gated_temperature_present_but_gap_reading_falls_back(conn):
+    _setup_car(conn, 20, 21, [("unavailable", _dt(9))], [("carport", _dt(9))])
+    _add_entity(conn, 22, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 23, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 23, "not_home", _dt(9))
+    conn.commit()
+
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport") is None
+
+
+def test_current_gated_temperature_unknown_entities_do_not_crash(conn):
+    conn.commit()
+    sources = {"jim": ("sensor.does_not_exist", "device_tracker.does_not_exist")}
+    assert get_current_gated_temperature(conn, sources, "carport") is None

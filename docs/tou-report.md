@@ -128,6 +128,35 @@ actually in place at the time -- earlier report dates than a given source's
 setup will show a temperature gap for that source, same gap-aware handling
 as everywhere else in this report.
 
+**A second, independent temperature source: south side / carport, from the
+Tesla's own sensor.** The Eve sensor above runs noticeably warm -- confirmed
+live (91°F vs. ~80°F on a Tesla parked nearby) -- because it picks up
+radiant heat reflected off a nearby concrete patio on the north side. The
+carport (south side) gets no direct sun; empirically confirmed as a good
+ambient proxy by temporarily moving the Eve sensor there and getting a
+reading within a couple degrees of the parked car. Rather than moving
+hardware permanently, this reuses data already available: both Teslas
+already report their own `outside_temperature` via the existing Tesla Fleet
+integration, gated by a new HA `zone` ("Carport") so only a reading from a
+car that's actually parked there counts.
+
+The gating/averaging logic (average both cars if both are present, use
+whichever one is if only one is, a gap if neither is) lives in
+`ha_recorder.py`'s `get_gated_temperature_samples()` -- deliberately in
+Python, not an HA-side template sensor, so it gets the same unit-test
+coverage as everything else here (`get_device_tracker_zone_intervals()`
+reconstructs zone-membership spans the same way `get_binary_sensor_intervals()`
+reconstructs on/off spans; both anchor on the state already in effect at
+the window's start, not just changes strictly inside it, so a car parked
+since before the report's window opened is still correctly recognized).
+
+Shown as a second line on the same chart (own color, sharing the existing
+`y1` axis), not blended into the north-side reading -- they're measuring
+genuinely different things. **Daily averages here are a plain mean of
+whatever event-driven samples exist that day, not duration-weighted** -- a
+day a car arrives at 6pm shows an average built from only a few evening
+samples, which can read as more confident than it actually is.
+
 **Billing-month tiering** approximates with calendar-month boundaries
 (`BILLING_CYCLE_START_DAY`), stated explicitly in the report rather than
 buried.
@@ -193,6 +222,12 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
    one additional bind mount for the report's output directory -- Docker
    can't add a mount to a running container, and there's no compose file
    managing this bare `docker run`.
+5. Add a `zone:` block to domus's `configuration.yaml` named "Carport"
+   (lat/long at the carport's center, tight radius -- e.g. 15m, enough to
+   exclude the driveway/street but loose enough for normal GPS jitter) for
+   the south-side/carport temperature reading above. Confirm empirically
+   (check each Tesla's `device_tracker` state while actually parked there)
+   rather than trusting the radius blindly.
 
 ## Known risks / things to watch
 
@@ -215,6 +250,14 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
   -- there is currently no mechanism to validate a winter-rate projection
   built from summer usage patterns, and showing one anyway would be a
   confident-looking number built on an unverified assumption.
+- **The south-side/carport temperature reading depends on a car actually
+  being parked there**, which is intermittent by nature -- most days will
+  show a real gap in that line, not a missing-data bug. Its daily averages
+  aren't duration-weighted (see above), and the "Carport" zone's radius was
+  set from a single estimate, not exhaustively field-tested against every
+  parking scenario (driveway/street parking is rare per the household's own
+  routine, but would read a few degrees warm if it ever slipped inside the
+  zone boundary).
 
 ## Status
 
@@ -226,12 +269,18 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
 - [x] `sensitivity.py`
 - [x] `render.py`
 - [x] `generate_report.py`
-- [x] Unit tests (52 passing) across all six logic modules, including a
+- [x] Unit tests (88 passing) across all logic modules, including a
       tariff-version boundary lookup, holiday weekend-observance shifting
       (including a cross-year-boundary case), a DST transition date, the
       cross-hour-boundary EV step-hold bug found and fixed during
-      development, and independence between sensitivity levers
+      development, independence between sensitivity levers, and the
+      south-side/carport temperature gating logic (zone-membership interval
+      reconstruction, presence-gated averaging, and the anchor-at-window-start
+      behavior needed for a car parked since before the report's window opens)
 - [x] `deploy.sh`
+- [x] South-side/carport temperature series (`get_gated_temperature_samples()`
+      in `ha_recorder.py`, wired into `generate_report.py`/`render.py`'s
+      existing outdoor-temperature chart)
 - [ ] Deployed to domus and verified end-to-end (cron entry live, nginx
       location block added, `ha-proxy` container recreated with the new
       bind mount, `curl` against the real URL confirmed)

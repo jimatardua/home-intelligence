@@ -13,7 +13,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from home_dashboard.temp_history import OUTDOOR_TEMP_ENTITY, get_recent_outdoor_temps
+from home_dashboard.temp_history import (
+    CARPORT_SOURCES,
+    OUTDOOR_TEMP_ENTITY,
+    get_current_carport_temp,
+    get_recent_outdoor_temps,
+)
 
 TZ = ZoneInfo("America/Denver")
 
@@ -78,3 +83,46 @@ def test_respects_hours_window(conn):
 
     points = get_recent_outdoor_temps(conn, _dt(14), hours=12)
     assert [p.temp_f for p in points] == [85.0]
+
+
+# --- get_current_carport_temp (thin wrapper over ha_recorder's combiner) ---
+
+
+def test_current_carport_temp_one_car_present(conn):
+    _add_entity(conn, 2, CARPORT_SOURCES["jim"][0])
+    _add_state(conn, 2, "80.0", _dt(9))
+    _add_entity(conn, 3, CARPORT_SOURCES["jim"][1])
+    _add_state(conn, 3, "carport", _dt(9))
+    _add_entity(conn, 4, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 5, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 5, "not_home", _dt(9))
+    conn.commit()
+
+    assert get_current_carport_temp(conn) == 80.0
+
+
+def test_current_carport_temp_both_cars_present_averages(conn):
+    _add_entity(conn, 2, CARPORT_SOURCES["jim"][0])
+    _add_state(conn, 2, "80.0", _dt(9))
+    _add_entity(conn, 3, CARPORT_SOURCES["jim"][1])
+    _add_state(conn, 3, "carport", _dt(9))
+    _add_entity(conn, 4, CARPORT_SOURCES["irina"][0])
+    _add_state(conn, 4, "84.0", _dt(9))
+    _add_entity(conn, 5, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 5, "carport", _dt(9))
+    conn.commit()
+
+    assert get_current_carport_temp(conn) == 82.0
+
+
+def test_current_carport_temp_neither_present_is_none(conn):
+    _add_entity(conn, 2, CARPORT_SOURCES["jim"][0])
+    _add_state(conn, 2, "80.0", _dt(9))
+    _add_entity(conn, 3, CARPORT_SOURCES["jim"][1])
+    _add_state(conn, 3, "not_home", _dt(9))
+    _add_entity(conn, 4, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 5, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 5, "work", _dt(9))
+    conn.commit()
+
+    assert get_current_carport_temp(conn) is None

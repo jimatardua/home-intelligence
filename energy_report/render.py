@@ -50,6 +50,7 @@ class DailyBreakdown:
     hours_present: int
     hours_expected: int
     avg_outdoor_temp_f: float | None = None
+    avg_carport_temp_f: float | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +141,10 @@ def _chart_series(daily: list[DailyBreakdown]) -> dict:
         "ac_hours": [round(d.ac_kwh / AC_ESTIMATED_KW, 1) for d in daily],
         "temp_f": [
             round(d.avg_outdoor_temp_f, 1) if d.avg_outdoor_temp_f is not None else None
+            for d in daily
+        ],
+        "temp_f_south": [
+            round(d.avg_carport_temp_f, 1) if d.avg_carport_temp_f is not None else None
             for d in daily
         ],
     }
@@ -302,6 +307,7 @@ footer{{text-align:center;font-size:11px;color:var(--muted);padding:10px 0}}
 <div class="card">
   <h3>Outdoor temperature vs. usage</h3>
   <div class="chart-wrap"><canvas id="tempChart"></canvas></div>
+  <p class="muted" style="margin-top:10px;font-size:12px">The two temperature lines aren't measuring the same thing: the north-side sensor runs warm from radiant heat off a nearby concrete patio, while the south-side/carport reading only exists while a Tesla is actually parked there (no direct sun -- a good ambient proxy) and is a plain daily average, not duration-weighted.</p>
 </div>
 
 <footer>
@@ -404,6 +410,7 @@ new Chart(document.getElementById('tempChart'), {{
       {{type: 'bar', label: 'Total usage', data: SERIES.total, backgroundColor: '#94a3b8', yAxisID: 'y'}},
       {{type: 'bar', label: 'A/C (estimated)', data: SERIES.ac, backgroundColor: '#d97706', yAxisID: 'y'}},
       {{type: 'line', label: 'Outdoor temp (avg)', data: SERIES.temp_f, borderColor: '#2563eb', backgroundColor: '#2563eb', yAxisID: 'y1', spanGaps: false, tension: 0.3}},
+      {{type: 'line', label: 'South side / carport (avg)', data: SERIES.temp_f_south, borderColor: '#16794f', backgroundColor: '#16794f', yAxisID: 'y1', spanGaps: false, tension: 0.3}},
     ]
   }},
   options: tempOpts

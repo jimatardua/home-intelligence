@@ -25,7 +25,12 @@ from pathlib import Path
 from .archive_loader import coverage_by_date, load_archive
 from .billing import compute_schedule1_cost, compute_tou_cost, total_cost
 from .disaggregation import disaggregate_hour
-from .ha_recorder import get_binary_sensor_intervals, get_numeric_sensor_samples, open_recorder_db
+from .ha_recorder import (
+    get_binary_sensor_intervals,
+    get_gated_temperature_samples,
+    get_numeric_sensor_samples,
+    open_recorder_db,
+)
 from .render import DailyBreakdown, LeverRow, ReportContext, render_report
 from .sensitivity import (
     billable_hours_from_disaggregation,
@@ -48,6 +53,20 @@ EV_LABELS = {"jim": "Jim's Tesla", "irina": "Irina's Tesla"}
 # get_weather_temperature_samples(). Historical data only exists from
 # whenever this sensor was added forward.
 WEATHER_ENTITY = "sensor.eve_weather_20ebs9901_temperature"
+
+# A second, independent outdoor-temperature source: the two Teslas' own
+# outside_temperature sensors, counted only while that car is actually
+# parked in the carport (south side, no direct sun -- confirmed a good
+# ambient proxy by temporarily moving the Eve sensor there and getting a
+# near-identical reading). The north-side Eve sensor above runs ~10°F warm
+# from radiant heat off a nearby concrete patio; this series exists to
+# contextualize that bias, not replace it -- see docs/tou-report.md.
+# Requires the "Carport" HA zone (domus-side config, not tracked here).
+CARPORT_ZONE = "carport"
+CARPORT_SOURCES = {
+    "jim": ("sensor.jim_s_tesla_outside_temperature", "device_tracker.jim_s_tesla_location"),
+    "irina": ("sensor.irina_s_tesla_outside_temperature", "device_tracker.irina_s_tesla_location"),
+}
 
 DAYS_INSUFFICIENT = 14
 DAYS_SEASONAL = 60
@@ -98,6 +117,9 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
         for car, entity in EV_ENTITIES.items()
     }
     weather_samples = get_numeric_sensor_samples(conn, WEATHER_ENTITY, window_start, window_end)
+    carport_samples = get_gated_temperature_samples(
+        conn, CARPORT_SOURCES, CARPORT_ZONE, window_start, window_end
+    )
 
     hours = [
         disaggregate_hour(r.start_local, r.usage_kwh, ac_intervals, ev_samples) for r in readings
@@ -154,7 +176,8 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
     ]
 
     daily_temps = _daily_avg_temps(weather_samples)
-    daily_breakdown = _daily_breakdown(hours, coverage, daily_temps)
+    carport_daily_temps = _daily_avg_temps(carport_samples)
+    daily_breakdown = _daily_breakdown(hours, coverage, daily_temps, carport_daily_temps)
 
     return ReportContext(
         generated_at=generated_at,
@@ -176,23 +199,26 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
     )
 
 
-def _daily_avg_temps(weather_samples) -> dict[date, float]:
-    """Mean outdoor temperature (°F) per local calendar date.
+def _daily_avg_temps(samples) -> dict[date, float]:
+    """Mean temperature (°F) per local calendar date, from any NumericSample series.
 
     Unlike EV power, temperature isn't something to integrate over time --
     a plain average of whatever readings exist that day is the right
     aggregation. A day with zero real (non-gap) readings is simply absent
     from the returned dict, so callers must treat a missing key as "no
-    data" rather than defaulting to 0.
+    data" rather than defaulting to 0. Source-agnostic -- used for both the
+    north-side (Eve Weather) and south-side (carport) series.
     """
     by_date = defaultdict(list)
-    for s in weather_samples:
+    for s in samples:
         if s.value is not None:
             by_date[s.at_local.date()].append(s.value)
     return {d: sum(vals) / len(vals) for d, vals in by_date.items()}
 
 
-def _daily_breakdown(hours, coverage, daily_temps: dict[date, float]) -> list[DailyBreakdown]:
+def _daily_breakdown(
+    hours, coverage, daily_temps: dict[date, float], carport_daily_temps: dict[date, float]
+) -> list[DailyBreakdown]:
     by_date = defaultdict(list)
     for h in hours:
         by_date[h.hour_start.date()].append(h)
@@ -219,6 +245,7 @@ def _daily_breakdown(hours, coverage, daily_temps: dict[date, float]) -> list[Da
                 hours_present=hours_present,
                 hours_expected=hours_expected,
                 avg_outdoor_temp_f=daily_temps.get(d),
+                avg_carport_temp_f=carport_daily_temps.get(d),
             )
         )
     return result

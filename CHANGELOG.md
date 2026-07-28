@@ -6,6 +6,29 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.24] - 2026-07-28
+
+- Add a second, independent outdoor-temperature source: the south side /
+  carport, derived from whichever Tesla's own `outside_temperature` sensor
+  is currently parked there (gated by a new HA "Carport" zone), alongside
+  the existing north-side Eve Weather reading -- which runs ~10°F warm from
+  patio radiant heat, confirmed empirically (91°F vs. ~80°F on a nearby
+  parked Tesla; converged to within a couple degrees when the Eve sensor
+  was temporarily moved to the shaded carport). New
+  `get_device_tracker_zone_intervals()` and `get_gated_temperature_samples()`/
+  `get_current_gated_temperature()` in `energy_report/ha_recorder.py` do the
+  zone-membership reconstruction and presence-gated averaging in Python
+  (not an HA template sensor), so the logic gets full unit-test coverage;
+  reused by both `energy_report`'s TOU chart (a second line on the existing
+  "Outdoor temperature vs. usage" chart) and `home_dashboard` (a small
+  annotation under the hero temperature, shown only while a car's actually
+  parked there). 26 new tests across both packages (147 total), including
+  the anchor-at-window-start behavior needed for a car parked since before
+  a report's window opens -- a real gap in how the existing
+  `get_binary_sensor_intervals()`-style interval reconstruction handles
+  state already in effect before a query window, worked around here rather
+  than changing that already-relied-upon existing function's behavior.
+
 ## [1.0.23] - 2026-07-28
 
 - Correction/completion of the 1.0.22 DNS fix: **disabling Wi-Fi on domus

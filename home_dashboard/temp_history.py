@@ -11,9 +11,22 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import sqlite3
 
-from energy_report.ha_recorder import get_numeric_sensor_samples
+from energy_report.ha_recorder import get_current_gated_temperature, get_numeric_sensor_samples
 
 OUTDOOR_TEMP_ENTITY = "sensor.eve_weather_20ebs9901_temperature"
+
+# A second, independent outdoor-temperature source -- see
+# energy_report/generate_report.py's CARPORT_ZONE/CARPORT_SOURCES for the
+# full rationale (north sensor runs warm from patio radiant heat; carport
+# reading only exists while a Tesla is actually parked there). Duplicated
+# here rather than shared into a new module, matching the existing
+# precedent of EV_ENTITIES being independently duplicated between
+# generate_report.py and this package.
+CARPORT_ZONE = "carport"
+CARPORT_SOURCES = {
+    "jim": ("sensor.jim_s_tesla_outside_temperature", "device_tracker.jim_s_tesla_location"),
+    "irina": ("sensor.irina_s_tesla_outside_temperature", "device_tracker.irina_s_tesla_location"),
+}
 
 
 @dataclass(frozen=True)
@@ -33,3 +46,9 @@ def get_recent_outdoor_temps(
     """
     samples = get_numeric_sensor_samples(conn, OUTDOOR_TEMP_ENTITY, now_local - timedelta(hours=hours), now_local)
     return [TempPoint(at_local=s.at_local, temp_f=s.value) for s in samples if s.value is not None]
+
+
+def get_current_carport_temp(conn: sqlite3.Connection) -> float | None:
+    """Current ambient temperature from whichever Tesla(s) are presently
+    parked in the carport, averaged if both are -- None if neither is."""
+    return get_current_gated_temperature(conn, CARPORT_SOURCES, CARPORT_ZONE)
