@@ -59,12 +59,34 @@ sensor/binary_sensor/switch/number/select/etc. domains. Deploying it produced
 a real, immediate config error: `'media_player' is an invalid option for
 'template'`. The actual currently-supported mechanism for "wrap an existing
 media_player and override just one action" is the built-in **Universal
-Media Player** (`media_player: - platform: universal`), which is simpler
-than what the failed attempt tried to build by hand: any command not
-explicitly listed under `commands:` automatically forwards to the (single)
-child entity, so only `turn_on` needed overriding --  `volume_mute`,
-`volume_set`, `select_source`, and `turn_off` all just work by virtue of the
-one `children:` entry, with no manual proxy wiring for each.
+Media Player** (`media_player: - platform: universal`).
+
+**Second real incident, found live after initial deployment**: Universal
+Media Player was initially configured with only `commands.turn_on`
+explicit, relying on automatic passthrough to the child for everything
+else (`turn_off`, mute, volume, `select_source`) -- reasoning that any
+command not listed under `commands:` just forwards to the (single) child
+entity automatically. This is true, but with a catch that only showed up in
+real use: **that passthrough support is computed from the child's *live*
+supported features, not a static declaration** -- so when the TV is fully
+off and the underlying `webostv` entity goes `unavailable` (its normal,
+expected behavior per HA's own docs), `media_player.tv` itself loses
+`turn_off` support entirely. "Alexa, turn off the TV" then failed outright
+with `homeassistant.exceptions.ServiceNotSupported: Entity media_player.tv
+does not support action media_player.turn_off` -- not a graceful no-op,
+a hard rejection surfaced straight to Alexa. `turn_on` never had this
+problem specifically because it was already explicitly declared, which is
+what makes an explicit `commands:` entry statically supported regardless
+of the child's live state.
+
+**Fixed** by explicitly declaring every command the same way `turn_on`
+already was -- `turn_off`, `volume_mute`, `volume_set`, and `select_source`,
+closing the exact same latent gap for all of them, plus `media_play`/
+`media_pause`/`media_stop` added proactively afterward for the identical
+reason (the underlying entity supports pause/play/stop per its own
+`supported_features` bitmask, and leaving those on implicit passthrough
+would have hit the same bug the first time the TV was off when someone
+tried "Alexa, pause the TV"):
 
 ```yaml
 media_player:
@@ -80,14 +102,49 @@ media_player:
         data:
           mac: "64:95:6C:8C:F5:D6"
           broadcast_address: "192.168.128.255"
+      turn_off:
+        action: media_player.turn_off
+        target:
+          entity_id: media_player.lg_webos_tv_55um7300aue
+      volume_mute:
+        action: media_player.volume_mute
+        target:
+          entity_id: media_player.lg_webos_tv_55um7300aue
+        data:
+          is_volume_muted: "{{ is_volume_muted }}"
+      volume_set:
+        action: media_player.volume_set
+        target:
+          entity_id: media_player.lg_webos_tv_55um7300aue
+        data:
+          volume_level: "{{ volume_level }}"
+      select_source:
+        action: media_player.select_source
+        target:
+          entity_id: media_player.lg_webos_tv_55um7300aue
+        data:
+          source: "{{ source }}"
+      media_play:
+        action: media_player.media_play
+        target:
+          entity_id: media_player.lg_webos_tv_55um7300aue
+      media_pause:
+        action: media_player.media_pause
+        target:
+          entity_id: media_player.lg_webos_tv_55um7300aue
+      media_stop:
+        action: media_player.media_stop
+        target:
+          entity_id: media_player.lg_webos_tv_55um7300aue
 
 wake_on_lan:
 ```
 
 `media_player.tv` (not the raw `webostv` entity) is what's exposed to Alexa
-for `PowerController` and `Speaker` (mute/volume) -- covering "turn on/off
-the TV" and "mute the TV" directly, with a real, working power-on for the
-first time.
+for `PowerController`, `Speaker` (mute/volume), and playback (pause/resume)
+-- covering "turn on/off the TV," "mute the TV," and "pause/resume the TV"
+directly, all statically supported regardless of the underlying TV's live
+availability.
 
 Wake-on-LAN itself was confirmed working at the network level before any of
 this HA config existed: a hand-built magic packet sent from domus
@@ -273,6 +330,18 @@ the one file, no dependency zip to build.
 - **`media_player.tv`'s `commands.turn_on` hardcodes the TV's MAC address**
   (`64:95:6C:8C:F5:D6`). If the TV is ever replaced or its network interface
   changes, this needs updating.
+- **The TV's IP address changed twice during this project**, since it never
+  had a DHCP reservation. `webostv`'s config entry stores a fixed `host`,
+  and HA's own SSDP-based auto-discovery caught the *first* change on its
+  own (silently updating the stored host), but not the second -- that one
+  needed a manual **Reconfigure** through Settings -> Devices & Services.
+  **Fixed for good** with a DHCP static mapping on pfSense
+  (`64:95:6C:8C:F5:D6` -> `192.168.128.111`), so this shouldn't recur. If it
+  ever does (e.g. after a TV replacement changes the MAC), the symptom is
+  the `webostv` entity going persistently `unavailable` with no recovery --
+  check `.storage/core.config_entries`'s stored `host` against the TV's
+  actual current IP (visible on its own Settings -> Connection screen)
+  before assuming anything else is wrong.
 
 ## Status
 
@@ -281,8 +350,10 @@ the one file, no dependency zip to build.
 - [x] Wake-on-LAN confirmed working at the network level (magic packet from
       domus wakes the TV from fully off)
 - [x] `media_player.tv` (Universal Media Player wrapper) -- turn_on
-      confirmed working via WOL, mute/volume/select_source/turn_off
-      confirmed working via automatic child passthrough
+      (WOL), turn_off, mute, volume, select_source, and pause/resume/stop
+      all explicitly declared under `commands:` (not left on implicit child
+      passthrough, which broke `turn_off` in production the first time the
+      TV was off -- see "Known risks")
 - [x] Seven per-app/alias scripts, source names confirmed against the TV's
       live `source_list`
 - [x] `alexa: smart_home:` component configured and scoped to just the
@@ -303,3 +374,13 @@ the one file, no dependency zip to build.
       name due to the brand-name collision above, plus "Apple TV" under its
       original name and an added "Apple Mode" alias for naming
       consistency).
+- [x] `turn_off`/mute/volume/select_source bug found in production and
+      fixed (see "Known risks") -- all `media_player.tv` commands, plus
+      pause/resume/stop, are now explicitly declared rather than relying on
+      implicit child passthrough.
+- [x] TV given a DHCP static reservation on pfSense (`192.168.128.111`),
+      after its IP changed twice during this project; `webostv`
+      reconfigured to match.
+- [x] A dedicated **Media** HA dashboard added (new sidebar entry, a
+      `media-control` card for `media_player.tv`) so the TV can also be
+      controlled directly from HA's own UI, not just via Alexa.

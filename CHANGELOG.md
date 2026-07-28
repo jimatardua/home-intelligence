@@ -6,6 +6,43 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.22] - 2026-07-28
+
+- Fix a real production bug in the LG TV Alexa integration: `media_player.tv`
+  (the Universal Media Player wrapper) only explicitly declared `turn_on`,
+  relying on implicit passthrough to the underlying `webostv` entity for
+  everything else. That passthrough support turned out to depend on the
+  child's *live* supported features -- so whenever the TV was fully off
+  (and the underlying entity correctly went `unavailable`, its normal
+  behavior), `media_player.tv` lost `turn_off` support entirely and "Alexa,
+  turn off the TV" failed outright with `ServiceNotSupported` instead of a
+  harmless no-op. Fixed by explicitly declaring `turn_off`, `volume_mute`,
+  `volume_set`, and `select_source` the same way `turn_on` already was;
+  `media_play`/`media_pause`/`media_stop` added proactively for the
+  identical reason, closing the same latent gap before it caused the same
+  bug for "Alexa, pause the TV."
+- The TV's IP address changed twice (no DHCP reservation existed): HA's own
+  SSDP-based auto-discovery silently caught the first change, but the
+  second needed a manual integration Reconfigure. Fixed for good with a
+  DHCP static mapping on pfSense (`192.168.128.111`).
+- Add a dedicated "Media" HA dashboard (new sidebar entry, a
+  `media-control` card for `media_player.tv`) so the TV can be controlled
+  from HA's own UI directly, not just via Alexa.
+- Fix chronic, intermittent DNS resolution failures on domus (recurring
+  `Cannot connect to host ... [Timeout while contacting DNS servers]`
+  errors affecting Tesla Fleet, weather-upload automations, and anything
+  else calling out to an external host) -- root cause was domus having both
+  Ethernet and Wi-Fi connected simultaneously, each with its own default
+  route and, critically, each resolving to a *different* DNS server
+  (`systemd-resolved` was aggregating both into `/etc/resolv.conf`,
+  producing inconsistent results depending on which got queried). The
+  Wi-Fi connection (to "Comanche") was a leftover with nothing depending on
+  it -- domus is wired-only per `hardware.md` and Ethernet was already the
+  preferred route. Disabled via HA's own Settings -> System -> Network;
+  confirmed clean afterward (single default route, single resolver, and a
+  25-request burst against every previously-failing host came back fast
+  with no timeouts).
+
 ## [1.0.21] - 2026-07-27
 
 - Add native Alexa Smart Home support for the family room LG webOS TV
