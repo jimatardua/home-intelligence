@@ -6,6 +6,26 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.23] - 2026-07-28
+
+- Correction/completion of the 1.0.22 DNS fix: **disabling Wi-Fi on domus
+  was the wrong fix**, and caused a real regression -- it broke
+  connectivity to Matter-over-Thread devices (e.g. the Eve Weather sensor)
+  entirely, since domus only gets a route to the Thread mesh's IPv6 prefix
+  via Wi-Fi's own Router Advertisements (confirmed: with Wi-Fi off,
+  `ip -6 route` had no route to the mesh prefix at all and `ping6` failed
+  outright with "Network is unreachable"; the Matter server's own
+  `ENETUNREACH` errors traced directly back to this, not a stale-cache or
+  address-change issue as first suspected). The actual root cause of the
+  original DNS flakiness was pfSense's DHCP server handing out an extra,
+  occasionally-unreliable DNS server (`192.168.128.3`) alongside the
+  primary one -- fixed at the DHCP server itself, which makes running both
+  Ethernet and Wi-Fi simultaneously safe again (both interfaces now agree
+  on a single resolver). Wi-Fi re-enabled; Matter server restarted once the
+  route was actually back, and the Eve Weather sensor confirmed reporting
+  live data again. See `hardware.md`'s domus section for the permanent
+  operational notes this surfaced.
+
 ## [1.0.22] - 2026-07-28
 
 - Fix a real production bug in the LG TV Alexa integration: `media_player.tv`
