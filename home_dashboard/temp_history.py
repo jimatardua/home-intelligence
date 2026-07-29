@@ -48,7 +48,16 @@ def get_recent_outdoor_temps(
     return [TempPoint(at_local=s.at_local, temp_f=s.value) for s in samples if s.value is not None]
 
 
-def get_current_carport_temp(conn: sqlite3.Connection) -> float | None:
+def get_current_carport_temp(
+    conn: sqlite3.Connection, max_age: timedelta = timedelta(hours=1), now_ts: float | None = None
+) -> float | None:
     """Current ambient temperature from whichever Tesla(s) are presently
-    parked in the carport, averaged if both are -- None if neither is."""
-    return get_current_gated_temperature(conn, CARPORT_SOURCES, CARPORT_ZONE)
+    parked in the carport, averaged if both are -- None if neither is, or
+    if the only reading(s) available are older than `max_age` (default 1
+    hour -- a car that's been asleep longer than that shouldn't have its
+    stale last-known reading presented as "the current temperature").
+    `now_ts`/`max_age` just forward to get_current_gated_temperature();
+    exposed here too so this wrapper stays independently testable with a
+    fixed "now" rather than the real wall clock.
+    """
+    return get_current_gated_temperature(conn, CARPORT_SOURCES, CARPORT_ZONE, max_age=max_age, now_ts=now_ts)

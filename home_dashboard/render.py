@@ -281,6 +281,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .outdoor{{text-align:center}}
 .outdoor .temp{{font-size:min(10vw,90px);font-weight:800;line-height:1}}
 .outdoor .condition{{font-size:min(3vw,22px);color:var(--muted)}}
+.outdoor .temp-row{{display:flex;align-items:baseline;justify-content:center;gap:min(2vw,14px)}}
 .outdoor .carport-temp{{font-size:min(2.2vw,16px);color:var(--muted)}}
 .battery-corner{{position:fixed;bottom:max(1vh,env(safe-area-inset-bottom));right:max(1vw,env(safe-area-inset-right));font-size:min(1.8vw,13px);color:var(--muted)}}
 .hero-stats{{display:flex;gap:6vw}}
@@ -330,9 +331,11 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     </div>
   </div>
   <div class="outdoor">
-    <div class="temp" id="outdoor-temp">--</div>
+    <div class="temp-row">
+      <div class="temp" id="outdoor-temp">--</div>
+      <div class="carport-temp" id="carport-temp"></div>
+    </div>
     <div class="condition" id="outdoor-condition"></div>
-    <div class="carport-temp" id="carport-temp"></div>
   </div>
   <div class="clock-block">
     <div class="clock" id="clock">--:--</div>
@@ -437,7 +440,7 @@ function drawSparkline(history) {{
 function applyData(d) {{
   document.getElementById('outdoor-temp').textContent = d.outdoor_temp_f != null ? Math.round(d.outdoor_temp_f) + '°' : '--';
   document.getElementById('outdoor-condition').textContent = d.condition || '';
-  document.getElementById('carport-temp').textContent = d.carport_temp_f != null ? 'Carport: ' + Math.round(d.carport_temp_f) + '°' : '';
+  document.getElementById('carport-temp').textContent = d.carport_temp_f != null ? 'Carport ' + Math.round(d.carport_temp_f) + '°' : '';
   document.getElementById('battery').textContent = d.outdoor_battery_pct != null ? '🔋 ' + Math.round(d.outdoor_battery_pct) + '%' : '';
 
   const currentPeriod = d.forecast && d.forecast[0];

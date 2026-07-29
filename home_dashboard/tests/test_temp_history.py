@@ -98,7 +98,7 @@ def test_current_carport_temp_one_car_present(conn):
     _add_state(conn, 5, "not_home", _dt(9))
     conn.commit()
 
-    assert get_current_carport_temp(conn) == 80.0
+    assert get_current_carport_temp(conn, now_ts=_dt(9).timestamp()) == 80.0
 
 
 def test_current_carport_temp_both_cars_present_averages(conn):
@@ -112,7 +112,21 @@ def test_current_carport_temp_both_cars_present_averages(conn):
     _add_state(conn, 5, "carport", _dt(9))
     conn.commit()
 
-    assert get_current_carport_temp(conn) == 82.0
+    assert get_current_carport_temp(conn, now_ts=_dt(9).timestamp()) == 82.0
+
+
+def test_current_carport_temp_stale_reading_excluded(conn):
+    _add_entity(conn, 2, CARPORT_SOURCES["jim"][0])
+    _add_state(conn, 2, "80.0", _dt(9))
+    _add_entity(conn, 3, CARPORT_SOURCES["jim"][1])
+    _add_state(conn, 3, "carport", _dt(9))
+    _add_entity(conn, 4, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 5, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 5, "not_home", _dt(9))
+    conn.commit()
+
+    stale_now = _dt(9).timestamp() + timedelta(hours=1, minutes=1).total_seconds()
+    assert get_current_carport_temp(conn, now_ts=stale_now) is None
 
 
 def test_current_carport_temp_neither_present_is_none(conn):

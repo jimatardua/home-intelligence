@@ -423,6 +423,23 @@ contextualize the north sensor's known warm bias, so placing it directly
 under that number -- and having it simply disappear when no car is present,
 rather than showing a placeholder -- is the more directly useful choice.
 
+**A real reliability gap found after deployment**: the underlying Tesla
+Fleet cloud API only polls roughly every 10 minutes, and a car can fall
+fully asleep in that same window right after parking -- freezing its
+last-known (possibly still mid-drive) position until something wakes it
+again. Confirmed live, not theoretical: a car showed "in the carport" while
+its actual last GPS fix was several blocks away. Fixed with a completely
+independent, local signal instead of trying to catch a cloud-reported
+"parked" event (which arrives together with GPS or not at all, so there's
+nothing to react to after the fact): each Tesla's Wi-Fi connecting to the
+home network, watched via a `ping` binary_sensor against its DHCP-reserved
+IP, triggering an automation that reloads the Tesla Fleet integration two
+minutes later, while the car's still awake. Full writeup in
+`docs/tou-report.md`. Relatedly, `get_current_carport_temp()` now refuses
+to return a reading older than 1 hour -- once a car's been asleep that
+long, its last-known temperature would be actively misleading if shown as
+current, so it goes blank instead.
+
 ## Known risks / things to watch
 
 - **A/C + EV usage today is an estimate of exactly those two loads, not
@@ -483,12 +500,14 @@ rather than showing a placeholder -- is the more directly useful choice.
       MIT licensed, replacing the original NWS-hotlinked `<img>` icons)
 - [x] PWA: `manifest.json`, `apple-touch-icon.png`, `icon-512.png` --
       installable/standalone on iOS, no service worker (see "PWA" above)
-- [x] Unit tests (59 passing in `home_dashboard`, 88 in `energy_report` --
-      147 total across both packages)
+- [x] Unit tests (60 passing in `home_dashboard`, 92 in `energy_report` --
+      152 total across both packages)
 - [x] `deploy.sh`
 - [x] Carport temperature annotation (`get_current_carport_temp()` in
       `temp_history.py`, hero placement in `render.py`) -- see "Carport
       temperature annotation" above
+- [x] Tesla Wi-Fi arrival automation + 1-hour staleness cutoff -- closes a
+      real reliability gap found live after initial deployment
 - [x] Deployed to domus and verified end-to-end (cron entry live, nginx
       location added, `ha-proxy` container recreated with the new bind
       mount, confirmed live via `curl` against `index.html`, `data.json`,

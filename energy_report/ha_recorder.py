@@ -15,11 +15,12 @@ for concurrent read-only access alongside HA's own recorder process.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import json
 import sqlite3
+import time
 
 from .archive_loader import LOCAL_TZ
 
@@ -377,8 +378,35 @@ def get_gated_temperature_samples(
     return [NumericSample(at_local=t, value=gated_value_at(t)) for t in sorted(event_times)]
 
 
+def _latest_state_with_timestamp(conn: sqlite3.Connection, entity_id: str) -> tuple[str | None, float | None]:
+    """Same as get_latest_state(), but also returns the raw UTC epoch
+    timestamp of that reading (None if the entity has no recorded state at
+    all). The state itself still follows the same gap convention (None for
+    a gap marker), independent of the timestamp -- a caller reasoning about
+    staleness needs the age even when the value itself turns out to be a
+    gap.
+    """
+    metadata_id = _metadata_id(conn, entity_id)
+    if metadata_id is None:
+        return None, None
+    row = conn.execute(
+        "SELECT state, last_updated_ts FROM states WHERE metadata_id = ? ORDER BY last_updated_ts DESC LIMIT 1",
+        (metadata_id,),
+    ).fetchone()
+    if row is None:
+        return None, None
+    state, ts = row
+    if state.lower() in _GAP_STATES:
+        return None, ts
+    return state, ts
+
+
 def get_current_gated_temperature(
-    conn: sqlite3.Connection, sources: dict[str, tuple[str, str]], zone: str
+    conn: sqlite3.Connection,
+    sources: dict[str, tuple[str, str]],
+    zone: str,
+    max_age: timedelta = timedelta(hours=1),
+    now_ts: float | None = None,
 ) -> float | None:
     """Current ambient temperature from whichever gated source(s) are
     presently in `zone`, averaged if more than one.
@@ -387,15 +415,28 @@ def get_current_gated_temperature(
     not the windowed reconstruction above -- because a source that's been
     in `zone` for hours without a new tracker row must still read as
     present, not as a gap the way a narrow recent time window would.
+
+    A present source's temperature reading only counts if it's no older
+    than `max_age` (default 1 hour). Once a car's been asleep long enough
+    that its last-known reading exceeds this, presenting it as "the
+    current temperature" would be actively misleading -- real outdoor
+    temperature can change meaningfully over that span -- so it's excluded
+    entirely rather than shown as if it were fresh. `now_ts` (a raw UTC
+    epoch, matching this module's `last_updated_ts` convention) defaults to
+    the real current time; overridable for deterministic tests.
     """
+    if now_ts is None:
+        now_ts = time.time()
     zone_lc = zone.lower()
     present_values: list[float] = []
     for temp_entity, tracker_entity in sources.values():
         zone_state = get_latest_state(conn, tracker_entity)
         if zone_state is None or zone_state.lower() != zone_lc:
             continue
-        temp_state = get_latest_state(conn, temp_entity)
-        if temp_state is None:
+        temp_state, temp_ts = _latest_state_with_timestamp(conn, temp_entity)
+        if temp_state is None or temp_ts is None:
+            continue
+        if now_ts - temp_ts > max_age.total_seconds():
             continue
         try:
             present_values.append(float(temp_state))

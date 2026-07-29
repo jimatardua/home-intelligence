@@ -6,6 +6,37 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.25] - 2026-07-29
+
+- Fix a real reliability gap in the carport temperature feature (1.0.24),
+  found live after deployment: HA's Tesla Fleet integration polls the cloud
+  API roughly every 10 minutes, and a Tesla can fall fully asleep in that
+  same window right after parking -- freezing its last-known (sometimes
+  still mid-drive) GPS position until something wakes it again. Confirmed
+  directly: a car showed "parked in the carport" while its actual last
+  fix was several blocks away. There's no reliable way to react to "just
+  parked" after the fact (an accurate GPS position arrives together with a
+  parked-status cloud update, or not at all before sleep) -- fixed instead
+  with a fully independent, local, near-instant signal: each Tesla's Wi-Fi
+  connecting to the home network (a `ping` binary_sensor per car, added via
+  HA's UI since `ping` isn't YAML-configurable in current versions, against
+  a DHCP-reserved IP found from the real MAC address on each car's own
+  Wi-Fi Diagnostics screen -- confirmed by MAC-vendor lookup against
+  "Tesla, Inc.", not guessed from ARP-table circumstantial evidence, which
+  produced a randomized-MAC false positive first). A new automation
+  (`tesla_carport_arrival_refresh`) reloads the Tesla Fleet integration two
+  minutes after either sensor connects, forcing a fresh poll while the car
+  is still awake.
+- Add a 1-hour staleness cutoff to `get_current_gated_temperature()`: a
+  reading older than that (the car's been asleep a while, with no way to
+  refresh without waking it routinely and draining its battery) is now
+  excluded rather than shown as if it were current -- the same "no data
+  beats wrong data" convention as everywhere else in `ha_recorder.py`.
+  5 new tests (152 total across both packages).
+- Home dashboard: move the carport temperature reading next to the main
+  outdoor temperature (smaller font, "Carport NN°") instead of stacked
+  underneath the condition text, per feedback after seeing it live.
+
 ## [1.0.24] - 2026-07-28
 
 - Add a second, independent outdoor-temperature source: the south side /

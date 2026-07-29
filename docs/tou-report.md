@@ -157,6 +157,47 @@ whatever event-driven samples exist that day, not duration-weighted** -- a
 day a car arrives at 6pm shows an average built from only a few evening
 samples, which can read as more confident than it actually is.
 
+**A real reliability gap found after deployment, and its fix.** HA's Tesla
+Fleet integration polls the cloud API on roughly a 10-minute cadence
+(measured directly from the live recorder DB, not assumed). Teslas commonly
+fall fully asleep within about 10-15 minutes of parking to save the 12V
+battery -- so there's a genuine race: if a drive happens to end shortly
+after a poll fires, the car can go fully asleep before the *next* poll
+lands, and that poll then just returns the vehicle's last-known (possibly
+still mid-drive) position rather than a live check, since polling a
+sleeping vehicle for detailed data doesn't itself force a fresh GPS fix.
+Confirmed live: a car reported "parked in the carport" while its actual
+last-known GPS position was several blocks away, mid-drive, frozen at the
+moment it fell asleep.
+
+There's no reliable way to react to "the car just parked" after the fact --
+by the time a poll would observe that status, an accurate GPS position
+would already be in the same response (or, in the failure case above,
+never arrives at all before sleep). The fix instead uses a completely
+independent, local, near-real-time signal: each Tesla's Wi-Fi connecting to
+the home network. A `ping` binary_sensor (HA's built-in integration, added
+via Settings -> Devices & Services -- not YAML, as of current HA versions)
+watches each car's own DHCP-reserved IP (found via its Wi-Fi Diagnostics
+screen, then confirmed by MAC-vendor lookup against "Tesla, Inc." -- not
+guessed from ARP-table circumstantial evidence, which produced a
+false-positive candidate with a randomized MAC address before the real one
+was found this way). An automation
+(`automations.yaml`'s `tesla_carport_arrival_refresh`) fires when either
+sensor flips on, waits two minutes, then reloads the Tesla Fleet
+integration to force a fresh poll while the car is still awake -- closing
+the exact gap the cloud-only polling missed.
+
+**A second, related fix: `get_current_gated_temperature()` now refuses to
+return a reading older than `max_age` (default 1 hour).** While a car is
+asleep, its last-known reading can't refresh at all (the whole point of
+the arrival automation above is to catch it *before* sleep, not to wake it
+routinely afterward, which would just trade this problem for real vehicle
+battery drain). Once that last-known reading is old enough, presenting it
+as "the current temperature" would be actively misleading -- real outdoor
+temperature can change meaningfully within an hour -- so it's excluded
+entirely rather than shown as if fresh, the same "no data is better than
+wrong data" convention as everywhere else in this module.
+
 **Billing-month tiering** approximates with calendar-month boundaries
 (`BILLING_CYCLE_START_DAY`), stated explicitly in the report rather than
 buried.
@@ -228,6 +269,17 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
    the south-side/carport temperature reading above. Confirm empirically
    (check each Tesla's `device_tracker` state while actually parked there)
    rather than trusting the radius blindly.
+6. Find each Tesla's real Wi-Fi MAC address from its own touchscreen
+   (Settings -> ... -> Wi-Fi -> Diagnostics), not guessed from ARP-table
+   circumstantial evidence -- confirm via a MAC-vendor lookup against
+   "Tesla, Inc." Add a DHCP static reservation for each on pfSense, then
+   (via HA's UI, Settings -> Devices & Services -> Add Integration -- the
+   `ping` integration is not YAML-configurable in current HA) add one
+   `ping` binary_sensor per car pointed at its reserved IP. Add the
+   `tesla_carport_arrival_refresh` automation to `automations.yaml`
+   (triggers on either ping sensor turning on, waits 2 minutes, reloads the
+   Tesla Fleet config entry) -- see the "real reliability gap" writeup
+   above for why.
 
 ## Known risks / things to watch
 
@@ -258,6 +310,12 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
   parking scenario (driveway/street parking is rare per the household's own
   routine, but would read a few degrees warm if it ever slipped inside the
   zone boundary).
+- **Even with the Wi-Fi arrival automation, a reading can still lag if
+  neither the automation nor HA's normal ~10-minute poll happens to land
+  before the vehicle sleeps again** -- the 1-hour staleness cutoff (see
+  above) means the *current* reading just goes blank rather than showing
+  something wrong in that case, but it's a real, expected gap, not
+  something to be alarmed by.
 
 ## Status
 
@@ -269,15 +327,20 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
 - [x] `sensitivity.py`
 - [x] `render.py`
 - [x] `generate_report.py`
-- [x] Unit tests (88 passing) across all logic modules, including a
+- [x] Unit tests (92 passing) across all logic modules, including a
       tariff-version boundary lookup, holiday weekend-observance shifting
       (including a cross-year-boundary case), a DST transition date, the
       cross-hour-boundary EV step-hold bug found and fixed during
-      development, independence between sensitivity levers, and the
+      development, independence between sensitivity levers, the
       south-side/carport temperature gating logic (zone-membership interval
       reconstruction, presence-gated averaging, and the anchor-at-window-start
-      behavior needed for a car parked since before the report's window opens)
+      behavior needed for a car parked since before the report's window opens),
+      and the 1-hour staleness cutoff on the current-reading function
 - [x] `deploy.sh`
+- [x] Tesla Wi-Fi arrival automation (`tesla_carport_arrival_refresh`) and
+      the 1-hour staleness cutoff on `get_current_gated_temperature()` --
+      closes a real reliability gap found after initial deployment (see the
+      "real reliability gap" writeup above)
 - [x] South-side/carport temperature series (`get_gated_temperature_samples()`
       in `ha_recorder.py`, wired into `generate_report.py`/`render.py`'s
       existing outdoor-temperature chart)

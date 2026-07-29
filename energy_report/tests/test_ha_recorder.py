@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -445,7 +445,7 @@ def test_current_gated_temperature_present_car_resolves(conn):
     _add_state(conn, 23, "not_home", _dt(9))
     conn.commit()
 
-    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport") == 80.0
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport", now_ts=_dt(9).timestamp()) == 80.0
 
 
 def test_current_gated_temperature_both_present_averages(conn):
@@ -453,7 +453,7 @@ def test_current_gated_temperature_both_present_averages(conn):
     _setup_car(conn, 22, 23, [("84.0", _dt(9))], [("carport", _dt(9))])
     conn.commit()
 
-    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport") == 82.0
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport", now_ts=_dt(9).timestamp()) == 82.0
 
 
 def test_current_gated_temperature_neither_present_is_none(conn):
@@ -461,7 +461,7 @@ def test_current_gated_temperature_neither_present_is_none(conn):
     _setup_car(conn, 22, 23, [("84.0", _dt(9))], [("work", _dt(9))])
     conn.commit()
 
-    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport") is None
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport", now_ts=_dt(9).timestamp()) is None
 
 
 def test_current_gated_temperature_present_but_gap_reading_falls_back(conn):
@@ -471,10 +471,63 @@ def test_current_gated_temperature_present_but_gap_reading_falls_back(conn):
     _add_state(conn, 23, "not_home", _dt(9))
     conn.commit()
 
-    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport") is None
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport", now_ts=_dt(9).timestamp()) is None
 
 
 def test_current_gated_temperature_unknown_entities_do_not_crash(conn):
     conn.commit()
     sources = {"jim": ("sensor.does_not_exist", "device_tracker.does_not_exist")}
-    assert get_current_gated_temperature(conn, sources, "carport") is None
+    assert get_current_gated_temperature(conn, sources, "carport", now_ts=_dt(9).timestamp()) is None
+
+
+def test_current_gated_temperature_stale_reading_excluded(conn):
+    # Present in the carport, and a real reading exists -- but it's from
+    # over an hour before "now" (e.g. the car has been asleep a while).
+    # Showing it as "the current temperature" would be misleading, so it
+    # must be excluded, not returned as if fresh.
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("carport", _dt(9))])
+    _add_entity(conn, 22, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 23, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 23, "not_home", _dt(9))
+    conn.commit()
+
+    now_ts = _dt(9).timestamp() + timedelta(hours=1, minutes=1).total_seconds()
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport", now_ts=now_ts) is None
+
+
+def test_current_gated_temperature_reading_at_exactly_max_age_still_counts(conn):
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("carport", _dt(9))])
+    _add_entity(conn, 22, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 23, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 23, "not_home", _dt(9))
+    conn.commit()
+
+    now_ts = _dt(9).timestamp() + timedelta(hours=1).total_seconds()
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport", now_ts=now_ts) == 80.0
+
+
+def test_current_gated_temperature_one_fresh_one_stale_uses_fresh_only(conn):
+    # Both present, but Irina's reading is over an hour old while Jim's is
+    # fresh -- the stale one must not drag a fabricated/averaged value in.
+    _setup_car(conn, 20, 21, [("80.0", _dt(11))], [("carport", _dt(9))])
+    _setup_car(conn, 22, 23, [("84.0", _dt(9))], [("carport", _dt(9))])
+    conn.commit()
+
+    now_ts = _dt(11).timestamp()
+    assert get_current_gated_temperature(conn, CARPORT_SOURCES, "carport", now_ts=now_ts) == 80.0
+
+
+def test_current_gated_temperature_custom_max_age(conn):
+    _setup_car(conn, 20, 21, [("80.0", _dt(9))], [("carport", _dt(9))])
+    _add_entity(conn, 22, CARPORT_SOURCES["irina"][0])
+    _add_entity(conn, 23, CARPORT_SOURCES["irina"][1])
+    _add_state(conn, 23, "not_home", _dt(9))
+    conn.commit()
+
+    now_ts = _dt(9).timestamp() + timedelta(minutes=20).total_seconds()
+    assert (
+        get_current_gated_temperature(
+            conn, CARPORT_SOURCES, "carport", max_age=timedelta(minutes=10), now_ts=now_ts
+        )
+        is None
+    )
