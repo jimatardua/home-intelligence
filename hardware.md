@@ -45,6 +45,34 @@
   fix (see above) -- the actual fix was correcting the DHCP server's
   configuration to hand out one consistent, reliable DNS server, which
   makes running both interfaces safe again.
+- **Tesla vehicles don't answer ICMP ping, even fully awake and online.**
+  Found live (2026-07-29) debugging why the Tesla WiFi-arrival automation
+  never fired: a `ping` binary_sensor against each car's DHCP-reserved IP
+  stayed `off` through a real arrival, even though the car's
+  `device_tracker` (Tesla Fleet cloud data) correctly showed it home.
+  Confirmed via `gateway.ardua.lan` (pfSense) directly -- `arp -a` showed a
+  fresh ARP entry for the car's MAC and `pfctl -s state` showed live
+  established TCP/UDP connections to Tesla's own cloud IPs, yet `ping` to
+  that same IP got 100% loss from both the gateway itself and domus. Not a
+  sleep/timing race, not a DHCP mismatch -- the car simply never answers
+  ICMP echo, full stop. Fixed by reading presence from pfSense's own ARP
+  table instead of pinging: a dedicated pfSense user (`ha-arp-monitor`)
+  with an SSH key restricted via `authorized_keys`'
+  `command="/usr/sbin/arp -an"` (forced command -- overrides anything the
+  client requests, no shell, no argument injection surface, verified
+  directly against the live account). Two real pfSense gotchas hit setting
+  this up: (1) pfSense locks a user's Unix account (`pw lock`, blocking SSH
+  entirely regardless of password) unless it holds one of a specific set of
+  privileges -- `User - System: Shell account access` is required just to
+  avoid the lock, even though the forced command means the granted shell is
+  never actually reachable; (2) pfSense regenerates `~/.ssh/authorized_keys`
+  from its own `config.xml` on every User Manager save, silently deleting
+  any key placed on the filesystem by hand -- the (restricted) key must be
+  entered into the GUI's "Authorized SSH Keys" field to survive future
+  saves. `binary_sensor.carport_jim_s_tesla_wifi` /
+  `..._irina_s_tesla_wifi` (the old `ping` sensors) are superseded by
+  `..._arp` sensors of the same shape; the old `ping` integration entries
+  can be removed from Settings > Devices & Services once confirmed stable.
 
 ## HVAC
 

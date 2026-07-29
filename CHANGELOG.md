@@ -6,6 +6,24 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.26] - 2026-07-29
+
+- Replace the Tesla WiFi-arrival `ping` sensors with ARP-based ones: found
+  live that Teslas never answer ICMP echo at all, even fully awake and
+  actively online (confirmed via pfSense's own ARP table and `pf` state
+  table showing a live, connected car while `ping` got 100% loss from both
+  the gateway and domus) -- so the `tesla_carport_arrival_refresh`
+  automation had silently never fired since being added in 1.0.25, despite
+  looking correctly configured. New `command_line` binary sensors
+  (`binary_sensor.carport_jim_s_tesla_arp` / `..._irina_s_tesla_arp`, 60s
+  poll) read presence from pfSense's live ARP table instead, over a
+  dedicated SSH account (`ha-arp-monitor`) whose key is restricted to a
+  single forced command (`arp -an`) via `authorized_keys` -- full
+  writeup of the setup gotchas (account-lock privilege requirement,
+  `authorized_keys` regeneration on GUI save) in hardware.md. Automation
+  updated to trigger off the new sensors; old `ping` sensors left in place
+  pending manual cleanup via Settings > Devices & Services.
+
 ## [1.0.25] - 2026-07-29
 
 - Fix a real reliability gap in the carport temperature feature (1.0.24),
