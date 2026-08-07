@@ -6,6 +6,23 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.27] - 2026-08-07
+
+- Add cigar-storage environment monitoring: 3 Govee H5075 BLE
+  thermo-hygrometers (wineador/drybox/desk), scanned by a new Raspberry Pi
+  (`mrteeny`) running the new `govee_collector` package as a systemd
+  service, publishing to a newly-installed Mosquitto MQTT broker (HA
+  add-on) via HA's native MQTT Discovery -- 12 auto-created sensor
+  entities (temp/humidity/battery/signal strength x 3 devices), with
+  LWT + `expire_after` staleness handling verified live (stop/restart the
+  collector, watched entities flip unavailable and recover). New
+  `cigar_dashboard` package (mirrors `home_dashboard`'s architecture) at
+  `/cigars/`: current readings plus 7-day humidity/temperature history via
+  two multi-series charts. First package in this repo to deploy to a host
+  other than domus. Full architecture, real findings (Supervisor API
+  quirks, an MQTT-anonymous-access gotcha, an MQTT-discovery `object_id`
+  gotcha), and setup steps in `docs/govee-cigar-monitor.md`.
+
 ## [1.0.26] - 2026-07-29
 
 - Replace the Tesla WiFi-arrival `ping` sensors with ARP-based ones: found

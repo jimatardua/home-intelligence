@@ -74,6 +74,28 @@
   `..._arp` sensors of the same shape; the old `ping` integration entries
   can be removed from Settings > Devices & Services once confirmed stable.
 
+## Cigar Storage Monitoring
+
+- 3x Govee H5075 Bluetooth LE thermo-hygrometer -- `TH01` in the Whynter
+  wineador (primary storage), `TH02` in an old wooden humidor repurposed as
+  a "drybox," `TH03` loose on the desk (ambient reference). Fixed MACs
+  (not randomized), decoded via community-reverse-engineered manufacturer
+  data -- see `docs/govee-cigar-monitor.md`.
+- Raspberry Pi 3, `mrteeny.ardua.lan` -- lives permanently in the office,
+  in BLE range of all 3 sensors (domus is not). Runs `govee_collector` as
+  a systemd service (`User=jramsey`, no elevated Bluetooth privileges
+  needed -- confirmed live, not assumed), publishing to an MQTT broker
+  (Mosquitto, installed as an HA add-on on domus) rather than the
+  SSH-forced-command pattern used for the pfSense ARP bridge -- mrteeny is
+  a general-purpose box under full control, unlike pfSense, so MQTT is the
+  better-fit standard pattern here. Eventually planned to be Velcro-mounted
+  to the back of the humidor.
+- **Adding any MQTT `logins` entry to the Mosquitto add-on disables
+  anonymous access broker-wide** -- broke HA's own "Add MQTT integration"
+  flow (which defaults to blank username/password) until a second,
+  dedicated `homeassistant` login was added alongside the collector's own
+  `govee-collector` login. Full writeup in `docs/govee-cigar-monitor.md`.
+
 ## HVAC
 
 - Nest Thermostat

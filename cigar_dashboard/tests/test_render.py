@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+
+from cigar_dashboard.govee_history import DeviceReading, HistoryPoint
+from cigar_dashboard.render import DEVICE_COLORS, DashboardContext, render_data_json, render_html
+
+LOCAL_TZ = timezone(timedelta(hours=-6))
+
+
+def _minimal_context(**overrides) -> DashboardContext:
+    defaults = dict(
+        generated_at=datetime(2026, 8, 7, 12, 0, tzinfo=LOCAL_TZ),
+        readings={
+            "TH01": DeviceReading(label="Wineador", temp_f=68.5, humidity_pct=65.2, battery_pct=92),
+            "TH02": DeviceReading(label="Drybox", temp_f=70.1, humidity_pct=45.0, battery_pct=88),
+            "TH03": DeviceReading(label="Desk", temp_f=74.3, humidity_pct=38.0, battery_pct=95),
+        },
+        humidity_history={},
+        temp_history={},
+    )
+    defaults.update(overrides)
+    return DashboardContext(**defaults)
+
+
+def test_data_json_includes_all_three_devices_with_correct_values():
+    ctx = _minimal_context()
+
+    data = json.loads(render_data_json(ctx))
+
+    assert data["devices"]["TH01"]["label"] == "Wineador"
+    assert data["devices"]["TH01"]["humidity_pct"] == 65.2
+    assert data["devices"]["TH01"]["temp_f"] == 68.5
+    assert data["devices"]["TH01"]["battery_pct"] == 92
+    assert data["devices"]["TH02"]["label"] == "Drybox"
+    assert data["devices"]["TH03"]["label"] == "Desk"
+
+
+def test_data_json_carries_a_stable_color_per_device():
+    ctx = _minimal_context()
+
+    data = json.loads(render_data_json(ctx))
+
+    for device_id, color in DEVICE_COLORS.items():
+        assert data["devices"][device_id]["color"] == color
+
+
+def test_data_json_missing_device_reading_is_none_not_fabricated():
+    ctx = _minimal_context(
+        readings={
+            "TH01": DeviceReading(label="Wineador", temp_f=None, humidity_pct=None, battery_pct=None),
+            "TH02": DeviceReading(label="Drybox", temp_f=70.1, humidity_pct=45.0, battery_pct=88),
+            "TH03": DeviceReading(label="Desk", temp_f=74.3, humidity_pct=38.0, battery_pct=95),
+        }
+    )
+
+    data = json.loads(render_data_json(ctx))
+
+    assert data["devices"]["TH01"]["temp_f"] is None
+    assert data["devices"]["TH01"]["humidity_pct"] is None
+
+
+def test_data_json_history_shape():
+    ctx = _minimal_context(
+        humidity_history={
+            "TH01": [
+                HistoryPoint(at_local=datetime(2026, 8, 1, 0, 0, tzinfo=LOCAL_TZ), value=64.0),
+                HistoryPoint(at_local=datetime(2026, 8, 7, 0, 0, tzinfo=LOCAL_TZ), value=65.2),
+            ]
+        }
+    )
+
+    data = json.loads(render_data_json(ctx))
+
+    assert data["humidity_history"]["TH01"] == [
+        {"t": "2026-08-01T00:00:00-06:00", "v": 64.0},
+        {"t": "2026-08-07T00:00:00-06:00", "v": 65.2},
+    ]
+
+
+def test_render_html_shows_missing_reading_as_dashes():
+    ctx = _minimal_context(
+        readings={
+            "TH01": DeviceReading(label="Wineador", temp_f=None, humidity_pct=None, battery_pct=None),
+            "TH02": DeviceReading(label="Drybox", temp_f=70.1, humidity_pct=45.0, battery_pct=88),
+            "TH03": DeviceReading(label="Desk", temp_f=74.3, humidity_pct=38.0, battery_pct=95),
+        }
+    )
+
+    html = render_html(ctx)
+
+    assert 'id="humidity-TH01">--<' in html
+    assert 'id="temp-TH01">--<' in html
+
+
+def test_render_html_includes_device_labels_and_current_values():
+    ctx = _minimal_context()
+
+    html = render_html(ctx)
+
+    assert "Wineador" in html
+    assert "Drybox" in html
+    assert "Desk" in html
+    assert 'id="humidity-TH01">65%<' in html
+    # 68.5 -- Python's `:.0f` uses round-half-to-even, so this is 68, not 69.
+    assert 'id="temp-TH01">68°F<' in html
+
+
+def test_render_html_is_valid_json_embedded_snapshot():
+    ctx = _minimal_context()
+
+    html = render_html(ctx)
+
+    # The initial data snapshot must be embedded as real, parseable JSON
+    # (first paint before the client-side fetch completes) -- not just
+    # present as text. Anchored on the call site specifically (`applyData({`
+    # immediately followed by a JSON object), not the `function applyData(d)`
+    # definition earlier in the same script, which also matches a naive
+    # "applyData(" search.
+    marker = "applyData({"
+    start = html.index(marker) + len("applyData(")
+    end = html.index(");\n", start)
+    embedded = html[start:end]
+    parsed = json.loads(embedded)
+    assert parsed["devices"]["TH01"]["label"] == "Wineador"

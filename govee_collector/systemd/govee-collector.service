@@ -1,0 +1,19 @@
+[Unit]
+Description=Govee H5075 BLE scanner (cigar storage sensors)
+After=bluetooth.target network.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+User=jramsey
+Group=jramsey
+WorkingDirectory=/opt/home-intelligence
+Environment=MQTT_HOST=domus.ardua.lan
+Environment=MQTT_USERNAME=govee-collector
+EnvironmentFile=-/etc/govee-collector.env
+ExecStart=/usr/bin/python3 -m govee_collector
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
