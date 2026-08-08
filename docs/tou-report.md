@@ -347,6 +347,14 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
 - [ ] Deployed to domus and verified end-to-end (cron entry live, nginx
       location block added, `ha-proxy` container recreated with the new
       bind mount, `curl` against the real URL confirmed)
+- [x] Shared cross-page nav + light/dark/auto theming (`site_shared`
+      package) -- this page went from light-only (no dark palette existed
+      at all) to full light/dark/auto, Chart.js grid/tick colors now
+      theme-aware and redraw on toggle via named chart instances
+      (`disaggChart`/`peakChart`/`tempChart`, previously anonymous). Full
+      writeup in `docs/site-shared.md`. `<meta http-equiv="refresh">` and
+      the Chart.js-via-CDN approach were explicitly left unchanged --
+      out of scope for this change.
 
 ## Phase 2 (deferred): AI narrative layer
 

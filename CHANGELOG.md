@@ -6,6 +6,31 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.30] - 2026-08-08
+
+- Add shared cross-page navigation, light/dark/auto theming, and PWA scope
+  correctness across all three dashboards (`home_dashboard`, `cigar_dashboard`,
+  `energy_report`) via a new `site_shared` package (theme.py, nav.py --
+  pure Python source, no new nginx/cron/bind-mount infrastructure; an
+  earlier draft proposed shared PWA static-asset serving and was cut once
+  it became clear only `home_dashboard` should ever be independently
+  installable). `energy_report` gained a dark palette for the first time
+  (previously light-only); all three now redraw chart colors on theme
+  change via a `themechange` event (Chart.js instances named for
+  `.update()`, hand-rolled SVG charts read `getComputedStyle` and
+  re-render from cached last-applied data). `home_dashboard`'s manifest
+  `scope` changed from `"."` to `"/"` so in-app nav doesn't drop out of
+  standalone mode on Chrome/Android; kiosk decision (confirmed with the
+  user) keeps that page's nav to page-links only, no interactive toggle,
+  positioned as a fixed corner element so it doesn't disturb the
+  hand-tuned vh/vw kiosk layout. New, this-time-committed
+  `home_dashboard/generate_pwa_icons.py` closes a real gap found while
+  building this: the original icon generator was never committed, only
+  its output survived. Confirmed zero infrastructure drift after the
+  fact (`docker inspect ha-proxy` binds byte-for-byte unchanged). 201
+  tests passing across all four packages. Full writeup in
+  `docs/site-shared.md`.
+
 ## [1.0.29] - 2026-08-08
 
 - Add a visible collector-health indicator for the Govee cigar-storage

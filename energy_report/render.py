@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 import json
 
+from site_shared import nav, theme
+
 from .archive_loader import LOCAL_TZ
 from .disaggregation import AC_ESTIMATED_KW
 
@@ -197,10 +199,13 @@ def render_report(ctx: ReportContext) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="refresh" content="3600">
 <title>RMP: Standard vs. Time-of-Use</title>
+{theme.render_theme_bootstrap_script()}
 {_CHARTJS_SCRIPT}
 {_CHARTJS_DATE_ADAPTER_SCRIPT}
 <style>
-:root{{--bg:#f0f2f5;--card:#fff;--header:#1a1a2e;--text:#212529;--muted:#6c757d;--gap:14px;--r:10px;--accent:#2563eb}}
+{theme.render_theme_style_block()}
+:root{{--header:#1a1a2e;--gap:14px;--r:10px}}
+{nav.NAV_STYLE}
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text)}}
 .wrap{{max-width:1000px;margin:0 auto;padding:var(--gap)}}
@@ -237,6 +242,7 @@ footer{{text-align:center;font-size:11px;color:var(--muted);padding:10px 0}}
 </head>
 <body>
 <div class="wrap">
+{nav.render_nav_html("energy-report")}
 <header>
   <h1>Rocky Mountain Power: Standard vs. Time-of-Use</h1>
   <span class="meta">Data as of {data_as_of_str} &nbsp;·&nbsp; <a href="." style="color:rgba(255,255,255,.6)">&#8635; refresh</a></span>
@@ -327,6 +333,29 @@ function setTab(name, btn) {{
   document.getElementById('tab-' + name).classList.add('active');
 }}
 
+// Chart.js can't consume CSS custom properties directly (canvas, not DOM
+// styling), so grid/tick colors -- unlike the page chrome, which is pure
+// CSS -- are computed here and re-applied on 'themechange'. Series/dataset
+// colors (the hex literals in each new Chart(...) call below) stay fixed
+// across themes on purpose, same as cigar_dashboard's per-device colors.
+function isDarkMode() {{
+  const dt = document.documentElement.getAttribute('data-theme');
+  if (dt === 'dark') return true;
+  if (dt === 'light') return false;
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+}}
+
+function chartThemeColors() {{
+  const dark = isDarkMode();
+  const muted = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+  return {{
+    grid: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+    tick: muted || (dark ? '#8b93a7' : '#6c757d'),
+  }};
+}}
+
+let themeColors = chartThemeColors();
+
 const commonOpts = {{
   responsive: true, maintainAspectRatio: false, animation: false,
   interaction: {{mode: 'index', intersect: false}},
@@ -334,8 +363,8 @@ const commonOpts = {{
     tooltip: {{callbacks: {{label: ctx => `${{ctx.dataset.label}}: ${{ctx.parsed.y}} kWh`}}}}
   }},
   scales: {{
-    x: {{stacked: true, grid: {{display: false}}, ticks: {{font: {{size: 10}}}}}},
-    y: {{stacked: true, beginAtZero: true, grid: {{color: 'rgba(0,0,0,0.04)'}}, ticks: {{font: {{size: 10}}, callback: v => v + ' kWh'}}}}
+    x: {{stacked: true, grid: {{display: false}}, ticks: {{font: {{size: 10}}, color: themeColors.tick}}}},
+    y: {{stacked: true, beginAtZero: true, grid: {{color: themeColors.grid}}, ticks: {{font: {{size: 10}}, color: themeColors.tick, callback: v => v + ' kWh'}}}}
   }}
 }};
 
@@ -352,7 +381,7 @@ const disaggOpts = {{
   }}
 }};
 
-new Chart(document.getElementById('disaggChart'), {{
+const disaggChart = new Chart(document.getElementById('disaggChart'), {{
   type: 'bar',
   data: {{
     labels: SERIES.labels,
@@ -365,13 +394,13 @@ new Chart(document.getElementById('disaggChart'), {{
   options: disaggOpts
 }});
 
-new Chart(document.getElementById('peakChart'), {{
+const peakChart = new Chart(document.getElementById('peakChart'), {{
   type: 'bar',
   data: {{
     labels: SERIES.labels,
     datasets: [
       {{label: 'On-peak (6-10pm weekdays)', data: SERIES.onpeak, backgroundColor: '#c0392b'}},
-      {{label: 'Off-peak', data: SERIES.offpeak, backgroundColor: '#2563eb'}},
+      {{label: 'Off-peak', data: SERIES.offpeak, backgroundColor: '#4da3ff'}},
     ]
   }},
   options: commonOpts
@@ -396,25 +425,42 @@ const tempOpts = {{
     }}
   }},
   scales: {{
-    x: {{grid: {{display: false}}, ticks: {{font: {{size: 10}}}}}},
-    y: {{beginAtZero: true, grid: {{color: 'rgba(0,0,0,0.04)'}}, ticks: {{font: {{size: 10}}, callback: v => v + ' kWh'}}}},
-    y1: {{position: 'right', grid: {{display: false}}, ticks: {{font: {{size: 10}}, callback: v => v + '°F'}}}}
+    x: {{grid: {{display: false}}, ticks: {{font: {{size: 10}}, color: themeColors.tick}}}},
+    y: {{beginAtZero: true, grid: {{color: themeColors.grid}}, ticks: {{font: {{size: 10}}, color: themeColors.tick, callback: v => v + ' kWh'}}}},
+    y1: {{position: 'right', grid: {{display: false}}, ticks: {{font: {{size: 10}}, color: themeColors.tick, callback: v => v + '°F'}}}}
   }}
 }};
 
-new Chart(document.getElementById('tempChart'), {{
+const tempChart = new Chart(document.getElementById('tempChart'), {{
   type: 'bar',
   data: {{
     labels: SERIES.labels,
     datasets: [
       {{type: 'bar', label: 'Total usage', data: SERIES.total, backgroundColor: '#94a3b8', yAxisID: 'y'}},
       {{type: 'bar', label: 'A/C (estimated)', data: SERIES.ac, backgroundColor: '#d97706', yAxisID: 'y'}},
-      {{type: 'line', label: 'Outdoor temp (avg)', data: SERIES.temp_f, borderColor: '#2563eb', backgroundColor: '#2563eb', yAxisID: 'y1', spanGaps: false, tension: 0.3}},
+      {{type: 'line', label: 'Outdoor temp (avg)', data: SERIES.temp_f, borderColor: '#4da3ff', backgroundColor: '#4da3ff', yAxisID: 'y1', spanGaps: false, tension: 0.3}},
       {{type: 'line', label: 'South side / carport (avg)', data: SERIES.temp_f_south, borderColor: '#16794f', backgroundColor: '#16794f', yAxisID: 'y1', spanGaps: false, tension: 0.3}},
     ]
   }},
   options: tempOpts
 }});
+
+// Re-applied on every 'themechange' (nav.py's toggle click, or the OS
+// scheme changing while in auto mode, per site_shared.theme's watch
+// script) -- Chart.js draws to canvas, so it never picks up new CSS
+// custom property values on its own the way the rest of the page's
+// pure-CSS chrome does.
+function applyChartTheme() {{
+  themeColors = chartThemeColors();
+  [disaggChart, peakChart, tempChart].forEach(chart => {{
+    Object.values(chart.options.scales).forEach(scale => {{
+      if (scale.grid) scale.grid.color = themeColors.grid;
+      if (scale.ticks) scale.ticks.color = themeColors.tick;
+    }});
+    chart.update();
+  }});
+}}
+document.addEventListener('themechange', applyChartTheme);
 </script>
 </body>
 </html>"""

@@ -17,13 +17,9 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from cigar_dashboard.govee_history import DEVICE_IDS, CollectorHealth, DeviceReading, HistoryPoint
+from site_shared import nav, theme
 
-BG_COLOR = "#0b0e14"
-CARD_COLOR = "#161b26"
-TEXT_COLOR = "#f2f4f8"
-MUTED_COLOR = "#8b93a7"
-WARN_COLOR = "#ef4444"
+from cigar_dashboard.govee_history import DEVICE_IDS, CollectorHealth, DeviceReading, HistoryPoint
 
 # Shown verbatim in the health banner when the collector needs manual
 # attention -- the exact sequence that fixed the one real BlueZ-adapter
@@ -137,8 +133,11 @@ def render_html(ctx: DashboardContext) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cigar Storage</title>
+{theme.render_theme_bootstrap_script()}
 <style>
-:root{{--bg:{BG_COLOR};--card:{CARD_COLOR};--text:{TEXT_COLOR};--muted:{MUTED_COLOR};--r:16px;--gap:16px}}
+{theme.render_theme_style_block()}
+:root{{--r:16px;--gap:16px}}
+{nav.NAV_STYLE}
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);padding:3vh 3vw;display:flex;flex-direction:column;gap:var(--gap)}}
 h1{{font-size:min(4vw,28px);font-weight:800}}
@@ -158,13 +157,15 @@ h1{{font-size:min(4vw,28px);font-weight:800}}
 .legend{{display:flex;gap:18px;margin-top:8px;flex-wrap:wrap}}
 .legend-item{{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}}
 .legend-swatch{{width:10px;height:10px;border-radius:2px;display:inline-block}}
-.health-banner{{background:#3a1414;border:1px solid {WARN_COLOR};border-radius:var(--r);padding:2vh 2vw;flex-direction:column;gap:8px}}
-.health-banner-message{{color:{WARN_COLOR};font-weight:700;font-size:15px}}
-.health-banner-fix{{background:{BG_COLOR};border-radius:8px;padding:10px 12px;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--text);white-space:pre-wrap;overflow-x:auto}}
+.health-banner{{background:var(--card);border:1px solid var(--warn);border-radius:var(--r);padding:2vh 2vw;flex-direction:column;gap:8px}}
+.health-banner-message{{color:var(--warn);font-weight:700;font-size:15px}}
+.health-banner-fix{{background:var(--bg);border-radius:8px;padding:10px 12px;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--text);white-space:pre-wrap;overflow-x:auto}}
 @media(max-width:700px){{.cards{{grid-template-columns:1fr}}}}
 </style>
 </head>
 <body>
+
+{nav.render_nav_html("cigars")}
 
 <div>
   <h1>Cigar Storage</h1>
@@ -231,6 +232,19 @@ function drawMultiSeries(svgEl, legendEl, histories, devices, unitSuffix) {{
   const yFor = v => padTop + plotH - plotH * ((v - minV) / spanV);
   const timeFmt = t => new Date(t).toLocaleDateString([], {{month: 'short', day: 'numeric'}});
 
+  // Grid/label colors can't be pure CSS (SVG attributes, not DOM styling
+  // Chart.js/CSS can reach into) -- read live from the current theme
+  // instead of hardcoding for one background, and re-read on every call
+  // (including themechange-triggered redraws) rather than caching once.
+  // Gridlines specifically use a translucent overlay (not a fixed hex)
+  // since they sit on the card background in both themes -- a flat hex
+  // tuned for one background (the original #2a2f3a was tuned for dark
+  // only) can end up invisible or wrong-contrast against the other.
+  const mutedColor = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim() || '#8b93a7';
+  const dt = document.documentElement.getAttribute('data-theme');
+  const isDark = dt === 'dark' || (dt !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const gridColor = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)';
+
   let svgHtml = '';
 
   seriesEntries.forEach(([id, points]) => {{
@@ -244,8 +258,8 @@ function drawMultiSeries(svgEl, legendEl, histories, devices, unitSuffix) {{
   // y-axis: a gridline + label at the overall min and max.
   [minV, maxV].forEach(v => {{
     const y = yFor(v).toFixed(1);
-    svgHtml += `<line x1="${{padLeft}}" y1="${{y}}" x2="${{width - padRight}}" y2="${{y}}" stroke="#2a2f3a" stroke-width="1"/>`;
-    svgHtml += `<text x="${{padLeft - 6}}" y="${{y}}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="#8b93a7">${{Math.round(v)}}${{unitSuffix}}</text>`;
+    svgHtml += `<line x1="${{padLeft}}" y1="${{y}}" x2="${{width - padRight}}" y2="${{y}}" stroke="${{gridColor}}" stroke-width="1"/>`;
+    svgHtml += `<text x="${{padLeft - 6}}" y="${{y}}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="${{mutedColor}}">${{Math.round(v)}}${{unitSuffix}}</text>`;
   }});
 
   // x-axis: a date label at the start, middle, and end of the window.
@@ -255,7 +269,7 @@ function drawMultiSeries(svgEl, legendEl, histories, devices, unitSuffix) {{
     [maxT, 'end'],
   ].forEach(([t, anchor]) => {{
     const x = xFor(t).toFixed(1);
-    svgHtml += `<text x="${{x}}" y="${{height - 4}}" text-anchor="${{anchor}}" font-size="11" fill="#8b93a7">${{timeFmt(t)}}</text>`;
+    svgHtml += `<text x="${{x}}" y="${{height - 4}}" text-anchor="${{anchor}}" font-size="11" fill="${{mutedColor}}">${{timeFmt(t)}}</text>`;
   }});
 
   svgEl.innerHTML = svgHtml;
@@ -279,7 +293,10 @@ function applyHealth(health) {{
   }}
 }}
 
+let lastData = null;
+
 function applyData(d) {{
+  lastData = d;
   document.getElementById('generated-at').textContent = 'Updated ' + new Date(d.generated_at).toLocaleTimeString([], {{hour: 'numeric', minute: '2-digit'}});
 
   applyHealth(d.collector_health);
@@ -308,6 +325,14 @@ async function refreshData() {{
   }}
 }}
 setInterval(refreshData, REFRESH_MS);
+
+// Re-redraw both SVG charts (their stroke/gridline colors are baked into
+// the markup at draw time, not pure CSS) whenever the theme changes --
+// from lastData rather than refetching, since the data itself hasn't
+// changed, only which colors it should be drawn with.
+document.addEventListener('themechange', () => {{
+  if (lastData) applyData(lastData);
+}});
 </script>
 </body>
 </html>"""

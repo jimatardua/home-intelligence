@@ -517,3 +517,11 @@ current, so it goes blank instead.
       fallback, "Add to Home Screen" installability and standalone
       launch behavior, visual layout at the device's real screen
       size/orientation)
+- [x] Shared light/dark/auto theming + cross-page nav (page-links only,
+      no toggle -- kiosk decision, see below) + manifest `scope` fix
+      (`"."` -> `"/"`, so in-app nav doesn't drop out of standalone mode
+      on Chrome/Android) via the new `site_shared` package -- full writeup
+      in `docs/site-shared.md`. New, this-time-committed
+      `generate_pwa_icons.py` fixes the earlier non-reproducibility gap
+      noted below (the icons themselves weren't changed, just made
+      reproducible going forward).

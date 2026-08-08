@@ -86,13 +86,17 @@ def test_manifest_icons_reference_expected_files():
         assert icon["type"] == "image/png"
 
 
-def test_manifest_start_url_and_scope_are_relative():
-    # Relative, not absolute -- must stay correct regardless of nginx's
+def test_manifest_start_url_is_relative_but_scope_is_site_wide():
+    # start_url stays relative -- must stay correct regardless of nginx's
     # /dashboard/ mount path, same reasoning as the client's relative
-    # fetch('data.json').
+    # fetch('data.json') -- it only needs to resolve to somewhere *within*
+    # scope, not equal to it. scope is "/" (not the old self-only "."), so
+    # Chrome/Android's installed-PWA shell doesn't kick a user out to a
+    # Custom Tab when the shared nav (site_shared.nav) links from an
+    # installed home_dashboard to /cigars/ or /energy-report/.
     manifest = json.loads(render_manifest_json())
     assert manifest["start_url"] == "."
-    assert manifest["scope"] == "."
+    assert manifest["scope"] == "/"
 
 
 def test_render_html_includes_pwa_head_tags():
@@ -153,3 +157,37 @@ def test_render_html_indoor_temp_gets_warn_class_toggle_in_script():
     html = render_html(_minimal_context())
     assert "should_button_up_house" in html
     assert "Outside is warmer<br>Button up the house" in html
+
+
+def test_render_html_includes_shared_nav_links_no_toggle():
+    # Kiosk decision: page-switch links yes, interactive toggle no -- see
+    # docs/home-dashboard.md.
+    html = render_html(_minimal_context())
+
+    assert 'href="/dashboard/" class="active"' in html
+    assert 'href="/cigars/"' in html
+    assert 'href="/energy-report/"' in html
+    # No toggle *element* or click-handling script -- nav.NAV_STYLE's
+    # .theme-toggle CSS rule is still present (shared, harmless dead CSS
+    # when unused), so this checks the actual element/behavior, not the
+    # class name as a bare substring.
+    assert 'id="theme-toggle"' not in html
+    assert "data-theme-choice" not in html
+
+
+def test_render_html_includes_shared_theme_css():
+    html = render_html(_minimal_context())
+
+    assert "@media (prefers-color-scheme: dark)" in html
+    assert ':root[data-theme="dark"]' in html
+
+
+def test_render_html_includes_theme_watch_script_for_os_scheme_changes():
+    # No manual toggle, but the kiosk stays open for days -- the OS scheme
+    # can still change (e.g. an iOS dark-mode schedule) and the sparkline's
+    # gridline/label colors (SVG markup, not pure CSS) need to follow.
+    html = render_html(_minimal_context())
+
+    assert "matchMedia" in html
+    assert "themechange" in html
+    assert "let lastHistory = null;" in html

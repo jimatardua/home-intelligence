@@ -20,16 +20,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 
+from site_shared import nav, theme
+from site_shared.theme import DARK as DARK_THEME
+
 from home_dashboard.icons import load_icon_sprite
 
-# Shared with both the CSS (:root custom properties) and manifest.json's
-# background_color/theme_color, so the two can't silently drift apart.
-BG_COLOR = "#0b0e14"
-CARD_COLOR = "#161b26"
-TEXT_COLOR = "#f2f4f8"
-MUTED_COLOR = "#8b93a7"
-ACCENT_COLOR = "#4da3ff"
-WARN_COLOR = "#ef4444"
+# BG_COLOR is still used directly for manifest.json's
+# background_color/theme_color (which can't consume a CSS var) -- sourced
+# from the shared dark palette, since this kiosk is normally dark (see
+# "Kiosk decision" -- passive auto-only, no toggle) and manifest colors are
+# a static, one-shot hint to the OS's install UI, not a live theme.
+BG_COLOR = DARK_THEME.bg
 
 # "Free cooling" (A/C off, windows open) turns into free heating once it's
 # warmer outside than in -- this margin keeps the button-up-the-house
@@ -225,9 +226,20 @@ def render_manifest_json() -> str:
 
     No live data involved -- generated fresh on every cron run anyway (like
     index.html/data.json) so it shares BG_COLOR with the CSS rather than
-    duplicating the hex value. Relative start_url/scope (".") so it's
+    duplicating the hex value. `start_url` stays relative (".") so it's
     correct regardless of nginx's /dashboard/ mount path, matching the
-    existing relative fetch('data.json') convention.
+    existing relative fetch('data.json') convention -- it only needs to
+    resolve to somewhere *within* scope, not equal to it.
+
+    `scope` is "/" (not the old "."/self-only scope) specifically so cross-
+    page nav (site_shared.nav) to /cigars/ or /energy-report/ from within
+    an installed, standalone home_dashboard doesn't get kicked out to a
+    Chrome/Android Custom Tab -- Chrome's installed-PWA shell enforces
+    manifest scope on every navigation. On iOS, standalone mode attaches to
+    the launching browsing context rather than being scope-enforced per
+    navigation, so this is a no-op there either way (matching the
+    `orientation: landscape` precedent below) -- real fix for Android,
+    harmless/spec-correct for iOS.
 
     "orientation": "landscape" matches how the target iPad is physically
     mounted, but note iOS Safari has never actually honored this field for
@@ -240,7 +252,7 @@ def render_manifest_json() -> str:
             "name": "Home",
             "short_name": "Home",
             "start_url": ".",
-            "scope": ".",
+            "scope": "/",
             "display": "standalone",
             "orientation": "landscape",
             "background_color": BG_COLOR,
@@ -268,8 +280,21 @@ def render_html(ctx: DashboardContext) -> str:
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Home">
 <meta name="theme-color" content="{BG_COLOR}">
+{theme.render_theme_bootstrap_script()}
 <style>
-:root{{--bg:{BG_COLOR};--card:{CARD_COLOR};--text:{TEXT_COLOR};--muted:{MUTED_COLOR};--accent:{ACCENT_COLOR};--r:16px;--gap:16px}}
+{theme.render_theme_style_block()}
+:root{{--r:16px;--gap:16px}}
+{nav.NAV_STYLE}
+/* Kiosk override: the shared nav is a small fixed corner element here,
+   not a top-of-page bar like the other two pages -- this page's whole
+   layout is hand-tuned vh/vw math filling exactly 100vh with
+   overflow:hidden (no scroll), so nothing can compete for flex space.
+   No toggle is rendered at all (show_toggle=False, see render_html) --
+   just enough to fit page-switch links without any layout risk. */
+.site-nav{{position:fixed;top:max(1vh,env(safe-area-inset-top));left:max(2vw,env(safe-area-inset-left));background:transparent;padding:0;margin:0;z-index:10}}
+.site-nav .links{{gap:2px}}
+.site-nav a{{font-size:min(1.6vw,12px);padding:2px 8px;background:var(--card);opacity:.8}}
+.site-nav a.active{{opacity:1}}
 *{{margin:0;padding:0;box-sizing:border-box}}
 html,body{{height:100%;overflow:hidden}}
 /* env(safe-area-inset-*) needs viewport-fit=cover above to be non-zero at
@@ -295,9 +320,9 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .card{{background:var(--card);border-radius:var(--r);padding:3vh 2vw}}
 .card .label{{font-size:min(2vw,13px);color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}}
 .card .value{{font-size:min(5vw,40px);font-weight:700}}
-.card .value.warn{{color:{WARN_COLOR}}}
+.card .value.warn{{color:var(--warn)}}
 .card .sub{{font-size:min(2.2vw,15px);color:var(--muted);margin-top:6px}}
-.card .sub.warn{{color:{WARN_COLOR};font-weight:600}}
+.card .sub.warn{{color:var(--warn);font-weight:600}}
 .sun-row{{display:flex;justify-content:space-around;align-items:center}}
 .sun-item{{display:flex;flex-direction:column;align-items:center;gap:4px}}
 .sun-item svg.icon{{width:min(11vw,64px);height:min(11vw,64px)}}
@@ -318,6 +343,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 <body>
 
 {load_icon_sprite()}
+{nav.render_nav_html("dashboard", show_toggle=False)}
+{theme.render_theme_watch_script()}
 
 <div class="hero">
   <div class="hero-stats">
@@ -414,13 +441,26 @@ function drawSparkline(history) {{
     .map(p => xFor(new Date(p.t).getTime()).toFixed(1) + ',' + yFor(p.v).toFixed(1))
     .join(' ');
 
+  // Grid/label colors read live from the current theme (re-read on every
+  // call, including themechange-triggered redraws) -- the polyline's own
+  // stroke stays the fixed accent #4da3ff across themes, same "series
+  // color stays constant, only neutrals swap" convention used everywhere
+  // else in this project. Gridlines use a translucent overlay rather than
+  // a flat hex since a color tuned for one background (the original
+  // #2a2f3a was dark-only) can end up invisible or wrong-contrast against
+  // the other.
+  const mutedColor = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim() || '#8b93a7';
+  const dt = document.documentElement.getAttribute('data-theme');
+  const isDark = dt === 'dark' || (dt !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const gridColor = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)';
+
   let svgHtml = `<polyline points="${{points}}" fill="none" stroke="#4da3ff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
 
   // y-axis: a gridline + label at the min and max temperature.
   [minV, maxV].forEach(v => {{
     const y = yFor(v).toFixed(1);
-    svgHtml += `<line x1="${{padLeft}}" y1="${{y}}" x2="${{width - padRight}}" y2="${{y}}" stroke="#2a2f3a" stroke-width="1"/>`;
-    svgHtml += `<text x="${{padLeft - 6}}" y="${{y}}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="#8b93a7">${{Math.round(v)}}°</text>`;
+    svgHtml += `<line x1="${{padLeft}}" y1="${{y}}" x2="${{width - padRight}}" y2="${{y}}" stroke="${{gridColor}}" stroke-width="1"/>`;
+    svgHtml += `<text x="${{padLeft - 6}}" y="${{y}}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="${{mutedColor}}">${{Math.round(v)}}°</text>`;
   }});
 
   // x-axis: a time label at the start, middle, and end of the window.
@@ -430,7 +470,7 @@ function drawSparkline(history) {{
     [maxT, 'end'],
   ].forEach(([t, anchor]) => {{
     const x = xFor(t).toFixed(1);
-    svgHtml += `<text x="${{x}}" y="${{height - 4}}" text-anchor="${{anchor}}" font-size="11" fill="#8b93a7">${{timeFmt(t)}}</text>`;
+    svgHtml += `<text x="${{x}}" y="${{height - 4}}" text-anchor="${{anchor}}" font-size="11" fill="${{mutedColor}}">${{timeFmt(t)}}</text>`;
   }});
 
   svg.innerHTML = svgHtml;
@@ -475,8 +515,11 @@ function applyData(d) {{
     forecastEl.appendChild(div);
   }});
 
+  lastHistory = d.outdoor_temp_history;
   drawSparkline(d.outdoor_temp_history);
 }}
+
+let lastHistory = null;
 
 applyData({initial_data});
 
@@ -490,6 +533,16 @@ async function refreshData() {{
   }}
 }}
 setInterval(refreshData, REFRESH_MS);
+
+// No manual toggle on this page (unattended kiosk, see docs/home-dashboard.md),
+// but the OS scheme can still change while the display stays open for days
+// (e.g. an iOS system dark-mode schedule) -- site_shared.theme's watch
+// script (included above) dispatches 'themechange' for that case, and the
+// sparkline's gridline/label colors (baked into SVG markup, not pure CSS)
+// need an explicit redraw to follow, same as the other two pages.
+document.addEventListener('themechange', () => {{
+  if (lastHistory) drawSparkline(lastHistory);
+}});
 
 function tick() {{
   const now = new Date();

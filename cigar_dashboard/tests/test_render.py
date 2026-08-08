@@ -198,3 +198,51 @@ def test_render_html_always_includes_the_manual_reset_commands():
     assert RESET_INSTRUCTIONS in html
     assert "hciconfig hci0 down" in html
     assert "systemctl restart govee-collector" in html
+
+
+def test_render_html_includes_shared_nav_linking_all_three_pages():
+    ctx = _minimal_context()
+
+    html = render_html(ctx)
+
+    assert 'href="/dashboard/"' in html
+    assert 'href="/cigars/" class="active"' in html
+    assert 'href="/energy-report/"' in html
+
+
+def test_render_html_includes_theme_toggle():
+    ctx = _minimal_context()
+
+    html = render_html(ctx)
+
+    assert 'id="theme-toggle"' in html
+    assert 'data-theme-choice="auto"' in html
+
+
+def test_render_html_includes_shared_theme_css():
+    ctx = _minimal_context()
+
+    html = render_html(ctx)
+
+    assert "@media (prefers-color-scheme: dark)" in html
+    assert ':root[data-theme="dark"]' in html
+
+
+def test_render_html_has_no_pwa_manifest_or_touch_icon_links():
+    # Explicitly should not become independently installable -- only
+    # home_dashboard gets a manifest link.
+    ctx = _minimal_context()
+
+    html = render_html(ctx)
+
+    assert 'rel="manifest"' not in html
+    assert 'rel="apple-touch-icon"' not in html
+
+
+def test_render_html_redraws_charts_on_themechange_from_cached_data():
+    ctx = _minimal_context()
+
+    html = render_html(ctx)
+
+    assert "document.addEventListener('themechange'" in html
+    assert "let lastData = null;" in html

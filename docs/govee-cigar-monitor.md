@@ -331,6 +331,12 @@ not as "everything's fine."
       confirmed live: correctly hidden while healthy
       (`{"is_problem": false, "status": "ok"}` flowing through to the real
       `data.json`).
+- [x] Shared cross-page nav + light/dark/auto theming (`site_shared`
+      package) -- top nav bar with a toggle, chart gridline/label colors
+      redraw on theme change from cached data. Full writeup in
+      `docs/site-shared.md`. Explicitly did NOT gain a PWA manifest/icon
+      link -- only `home_dashboard` is meant to be independently
+      installable.
 - [ ] Visually reviewed in an actual browser at
       `https://domus.ardua.com/cigars/` (built and verified via `curl`
       and direct file inspection so far, not yet eyeballed live)
