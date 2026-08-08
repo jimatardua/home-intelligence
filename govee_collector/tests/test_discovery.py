@@ -2,20 +2,26 @@ from __future__ import annotations
 
 from govee_collector.decode import DEVICE_LABELS
 from govee_collector.discovery import (
+    COLLECTOR_DEVICE_ID,
     EXPIRE_AFTER_SECONDS,
+    HEALTH_TOPIC,
     METRICS,
     STATUS_TOPIC,
     all_discovery_messages,
+    collector_health_discovery_messages,
+    collector_problem_payload,
+    collector_stale_seconds_payload,
+    collector_status_payload,
     discovery_payload,
     discovery_topic,
     state_topic,
 )
 
 
-def test_all_discovery_messages_covers_every_device_and_metric():
+def test_all_discovery_messages_covers_every_device_metric_plus_health():
     messages = all_discovery_messages()
 
-    assert len(messages) == len(DEVICE_LABELS) * len(METRICS)
+    assert len(messages) == len(DEVICE_LABELS) * len(METRICS) + len(collector_health_discovery_messages())
 
 
 def test_discovery_topics_are_unique():
@@ -105,3 +111,45 @@ def test_rssi_metric_device_class():
     rssi = next(m for m in METRICS if m.object_id_suffix == "rssi")
     assert rssi.device_class == "signal_strength"
     assert rssi.unit == "dBm"
+
+
+def test_collector_health_discovery_messages_count():
+    assert len(collector_health_discovery_messages()) == 3
+
+
+def test_collector_health_messages_grouped_under_one_collector_device():
+    for _, payload in collector_health_discovery_messages():
+        assert payload["device"]["identifiers"] == [COLLECTOR_DEVICE_ID]
+        assert payload["device"]["name"] == "Govee Collector"
+
+
+def test_collector_health_messages_use_health_topic_as_state_topic():
+    for _, payload in collector_health_discovery_messages():
+        assert payload["state_topic"] == HEALTH_TOPIC
+
+
+def test_collector_problem_payload_is_a_problem_binary_sensor():
+    payload = collector_problem_payload()
+
+    assert payload["device_class"] == "problem"
+    assert payload["value_template"] == "{{ 'ON' if value_json.status != 'ok' else 'OFF' }}"
+
+
+def test_collector_status_payload_surfaces_raw_status_string():
+    payload = collector_status_payload()
+
+    assert payload["value_template"] == "{{ value_json.status }}"
+    assert "device_class" not in payload  # plain text, not a typed HA device class
+
+
+def test_collector_stale_seconds_payload_is_a_duration_sensor():
+    payload = collector_stale_seconds_payload()
+
+    assert payload["device_class"] == "duration"
+    assert payload["unit_of_measurement"] == "s"
+    assert payload["value_template"] == "{{ value_json.seconds_since_last_advertisement }}"
+
+
+def test_collector_health_messages_availability_wired_to_status_topic():
+    for _, payload in collector_health_discovery_messages():
+        assert payload["availability_topic"] == STATUS_TOPIC

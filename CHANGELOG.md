@@ -6,6 +6,22 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.29] - 2026-08-08
+
+- Add a visible collector-health indicator for the Govee cigar-storage
+  monitor: 3 new diagnostic HA entities
+  (`binary_sensor.govee_collector_problem` + status/duration sensors,
+  grouped under their own "Govee Collector" device via a new
+  `govee/collector/health` MQTT topic) distinguish "still retrying
+  automatically" from "stuck, needs a human" -- the 1.0.28 watchdog fixed
+  the common silent-stall case but gave no visibility into the harder
+  adapter-lockup case. The `cigar_dashboard` page now shows a red banner
+  at `/cigars/` whenever there's a problem, with the exact manual
+  `hciconfig`/`bluetooth` reset commands printed directly in the banner --
+  no doc-digging needed in the moment. A gap/unavailable state is treated
+  as a problem too, not silently hidden. 16 new tests (47 in
+  `govee_collector`, 23 in `cigar_dashboard`, 70 total).
+
 ## [1.0.28] - 2026-08-08
 
 - Fix a real reliability gap in the Govee cigar-storage collector (1.0.27),

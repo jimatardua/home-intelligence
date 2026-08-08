@@ -3,8 +3,14 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-from cigar_dashboard.govee_history import DeviceReading, HistoryPoint
-from cigar_dashboard.render import DEVICE_COLORS, DashboardContext, render_data_json, render_html
+from cigar_dashboard.govee_history import CollectorHealth, DeviceReading, HistoryPoint
+from cigar_dashboard.render import (
+    DEVICE_COLORS,
+    RESET_INSTRUCTIONS,
+    DashboardContext,
+    render_data_json,
+    render_html,
+)
 
 LOCAL_TZ = timezone(timedelta(hours=-6))
 
@@ -124,3 +130,71 @@ def test_render_html_is_valid_json_embedded_snapshot():
     embedded = html[start:end]
     parsed = json.loads(embedded)
     assert parsed["devices"]["TH01"]["label"] == "Wineador"
+
+
+def test_data_json_includes_collector_health():
+    ctx = _minimal_context(
+        collector_health=CollectorHealth(is_problem=True, status="stuck", seconds_since_last_reading=612.0)
+    )
+
+    data = json.loads(render_data_json(ctx))
+
+    assert data["collector_health"] == {
+        "is_problem": True,
+        "status": "stuck",
+        "seconds_since_last_reading": 612.0,
+    }
+
+
+def test_render_html_hides_health_banner_when_ok():
+    ctx = _minimal_context(collector_health=CollectorHealth(is_problem=False, status="ok", seconds_since_last_reading=4.0))
+
+    html = render_html(ctx)
+
+    assert 'id="health-banner" style="display:none"' in html
+
+
+def test_render_html_shows_health_banner_when_stuck():
+    ctx = _minimal_context(
+        collector_health=CollectorHealth(is_problem=True, status="stuck", seconds_since_last_reading=612.0)
+    )
+
+    html = render_html(ctx)
+
+    assert 'id="health-banner" style="display:flex"' in html
+    assert "automatic retries have failed" in html
+
+
+def test_render_html_shows_health_banner_when_stale_with_duration():
+    ctx = _minimal_context(
+        collector_health=CollectorHealth(is_problem=True, status="stale", seconds_since_last_reading=245.0)
+    )
+
+    html = render_html(ctx)
+
+    assert 'id="health-banner" style="display:flex"' in html
+    assert "245s" in html
+    assert "retrying automatically" in html
+
+
+def test_render_html_shows_health_banner_when_status_unknown():
+    ctx = _minimal_context(collector_health=CollectorHealth(is_problem=True, status=None, seconds_since_last_reading=None))
+
+    html = render_html(ctx)
+
+    assert 'id="health-banner" style="display:flex"' in html
+    assert "unknown" in html.lower()
+
+
+def test_render_html_always_includes_the_manual_reset_commands():
+    # Even when hidden by CSS, the fix instructions must be present in the
+    # markup so the client-side JS can reveal them without a second fetch --
+    # and so the exact commands are directly copy-pasteable from the page
+    # the moment someone sees the banner, no doc-digging required.
+    ctx = _minimal_context()
+
+    html = render_html(ctx)
+
+    assert RESET_INSTRUCTIONS in html
+    assert "hciconfig hci0 down" in html
+    assert "systemctl restart govee-collector" in html

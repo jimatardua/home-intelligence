@@ -13,7 +13,12 @@ import os
 import sys
 from pathlib import Path
 
-from cigar_dashboard.govee_history import get_current_readings, get_humidity_history, get_temp_history
+from cigar_dashboard.govee_history import (
+    get_collector_health,
+    get_current_readings,
+    get_humidity_history,
+    get_temp_history,
+)
 from cigar_dashboard.render import DashboardContext, render_data_json, render_html
 from energy_report.ha_recorder import open_recorder_db
 
@@ -34,6 +39,7 @@ def _build_context(db_path: Path) -> DashboardContext:
         readings=get_current_readings(conn),
         humidity_history=get_humidity_history(conn, now_local),
         temp_history=get_temp_history(conn, now_local),
+        collector_health=get_collector_health(conn),
     )
 
 

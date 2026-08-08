@@ -27,9 +27,15 @@ from govee_collector.decode import DEVICE_LABELS
 
 DISCOVERY_PREFIX = "homeassistant"
 STATUS_TOPIC = "govee/collector/status"
+HEALTH_TOPIC = "govee/collector/health"
 
 STATUS_PAYLOAD_AVAILABLE = "online"
 STATUS_PAYLOAD_NOT_AVAILABLE = "offline"
+
+# A single HA "device" for collector-level diagnostics (not one of the 3
+# physical Govee sensors) -- see "Collector health" below.
+COLLECTOR_DEVICE_ID = "govee_collector"
+COLLECTOR_DEVICE_NAME = "Govee Collector"
 
 # H5075s broadcast every few seconds, so 5 minutes of silence already means
 # something's wrong (dead battery, out of range, BLE issue) -- a starting
@@ -94,10 +100,94 @@ def discovery_payload(device_id: str, metric: MetricSpec) -> dict:
     }
 
 
+def _collector_device() -> dict:
+    return {
+        "identifiers": [COLLECTOR_DEVICE_ID],
+        "name": COLLECTOR_DEVICE_NAME,
+    }
+
+
+def collector_problem_topic() -> str:
+    return f"{DISCOVERY_PREFIX}/binary_sensor/{COLLECTOR_DEVICE_ID}/problem/config"
+
+
+def collector_problem_payload() -> dict:
+    """`status != "ok"` as a standard HA "problem" binary_sensor -- covers
+    both `stale` (watchdog actively retrying) and `stuck` (retries
+    exhausted, needs a manual adapter reset -- see collector.py's
+    `STUCK_AFTER_CONSECUTIVE_FAILURES`)."""
+    return {
+        "name": "Problem",
+        "object_id": "govee_collector_problem",
+        "unique_id": f"{COLLECTOR_DEVICE_ID}_problem",
+        "state_topic": HEALTH_TOPIC,
+        "value_template": "{{ 'ON' if value_json.status != 'ok' else 'OFF' }}",
+        "device_class": "problem",
+        "qos": 1,
+        "availability_topic": STATUS_TOPIC,
+        "payload_available": STATUS_PAYLOAD_AVAILABLE,
+        "payload_not_available": STATUS_PAYLOAD_NOT_AVAILABLE,
+        "has_entity_name": True,
+        "device": _collector_device(),
+    }
+
+
+def collector_status_topic() -> str:
+    return f"{DISCOVERY_PREFIX}/sensor/{COLLECTOR_DEVICE_ID}/status/config"
+
+
+def collector_status_payload() -> dict:
+    return {
+        "name": "Status",
+        "object_id": "govee_collector_status",
+        "unique_id": f"{COLLECTOR_DEVICE_ID}_status",
+        "state_topic": HEALTH_TOPIC,
+        "value_template": "{{ value_json.status }}",
+        "qos": 1,
+        "availability_topic": STATUS_TOPIC,
+        "payload_available": STATUS_PAYLOAD_AVAILABLE,
+        "payload_not_available": STATUS_PAYLOAD_NOT_AVAILABLE,
+        "has_entity_name": True,
+        "device": _collector_device(),
+    }
+
+
+def collector_stale_seconds_topic() -> str:
+    return f"{DISCOVERY_PREFIX}/sensor/{COLLECTOR_DEVICE_ID}/stale_seconds/config"
+
+
+def collector_stale_seconds_payload() -> dict:
+    return {
+        "name": "Seconds Since Last Reading",
+        "object_id": "govee_collector_stale_seconds",
+        "unique_id": f"{COLLECTOR_DEVICE_ID}_stale_seconds",
+        "state_topic": HEALTH_TOPIC,
+        "value_template": "{{ value_json.seconds_since_last_advertisement }}",
+        "unit_of_measurement": "s",
+        "device_class": "duration",
+        "state_class": "measurement",
+        "qos": 1,
+        "availability_topic": STATUS_TOPIC,
+        "payload_available": STATUS_PAYLOAD_AVAILABLE,
+        "payload_not_available": STATUS_PAYLOAD_NOT_AVAILABLE,
+        "has_entity_name": True,
+        "device": _collector_device(),
+    }
+
+
+def collector_health_discovery_messages() -> list[tuple[str, dict]]:
+    return [
+        (collector_problem_topic(), collector_problem_payload()),
+        (collector_status_topic(), collector_status_payload()),
+        (collector_stale_seconds_topic(), collector_stale_seconds_payload()),
+    ]
+
+
 def all_discovery_messages() -> list[tuple[str, dict]]:
-    """(topic, payload) for every entity across all known devices."""
+    """(topic, payload) for every entity across all known devices, plus the
+    3 collector-level health/diagnostic entities."""
     return [
         (discovery_topic(device_id, metric), discovery_payload(device_id, metric))
         for device_id in DEVICE_LABELS
         for metric in METRICS
-    ]
+    ] + collector_health_discovery_messages()

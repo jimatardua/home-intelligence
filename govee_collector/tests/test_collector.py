@@ -5,11 +5,17 @@ import json
 import pytest
 
 from govee_collector.collector import (
+    HEALTH_STATUS_OK,
+    HEALTH_STATUS_STALE,
+    HEALTH_STATUS_STUCK,
     RESTART_RETRY_INTERVAL_SECONDS,
     STALE_RESTART_THRESHOLD_SECONDS,
+    STUCK_AFTER_CONSECUTIVE_FAILURES,
     DeviceState,
     apply_advertisement,
+    build_health_payload,
     build_state_payload,
+    compute_health_status,
     is_stale,
     should_attempt_restart,
 )
@@ -141,3 +147,67 @@ def test_should_attempt_restart_true_after_cooldown_elapses():
     last_restart_attempt_at = now - (RESTART_RETRY_INTERVAL_SECONDS + 1)
 
     assert should_attempt_restart(last_advertisement_at, last_restart_attempt_at, now) is True
+
+
+def test_compute_health_status_ok_when_fresh():
+    now = 1000.0
+    assert compute_health_status(last_advertisement_at=now - 5, consecutive_restart_failures=0, now=now) == HEALTH_STATUS_OK
+
+
+def test_compute_health_status_stale_when_gap_but_still_retrying():
+    now = 1000.0
+    last_advertisement_at = now - STALE_RESTART_THRESHOLD_SECONDS - 1
+    failures = STUCK_AFTER_CONSECUTIVE_FAILURES - 1
+
+    status = compute_health_status(last_advertisement_at, failures, now)
+
+    assert status == HEALTH_STATUS_STALE
+
+
+def test_compute_health_status_stuck_after_enough_consecutive_failures():
+    now = 1000.0
+    last_advertisement_at = now - STALE_RESTART_THRESHOLD_SECONDS - 1
+
+    status = compute_health_status(last_advertisement_at, STUCK_AFTER_CONSECUTIVE_FAILURES, now)
+
+    assert status == HEALTH_STATUS_STUCK
+
+
+def test_compute_health_status_ok_even_with_stale_failure_count_if_advertisement_is_fresh():
+    # A high failure count from a past incident shouldn't linger and cause
+    # a false "stuck" reading once real data is flowing again -- callers
+    # (run()) are expected to reset the failure counter on a real
+    # advertisement, but compute_health_status() itself is also correctly
+    # OK-first regardless, since staleness is the primary signal.
+    now = 1000.0
+    status = compute_health_status(last_advertisement_at=now - 1, consecutive_restart_failures=10, now=now)
+
+    assert status == HEALTH_STATUS_OK
+
+
+def test_build_health_payload_shape_when_fresh():
+    now = 1000.0
+    last_advertisement_at = now - 5  # well under STALE_RESTART_THRESHOLD_SECONDS
+
+    payload = json.loads(build_health_payload(last_advertisement_at, consecutive_restart_failures=0, now=now))
+
+    assert payload == {
+        "status": HEALTH_STATUS_OK,
+        "seconds_since_last_advertisement": 5,
+        "consecutive_restart_failures": 0,
+    }
+
+
+def test_build_health_payload_shape_when_stuck():
+    now = 1000.0
+    last_advertisement_at = now - STALE_RESTART_THRESHOLD_SECONDS - 42
+
+    payload = json.loads(
+        build_health_payload(last_advertisement_at, consecutive_restart_failures=STUCK_AFTER_CONSECUTIVE_FAILURES, now=now)
+    )
+
+    assert payload == {
+        "status": HEALTH_STATUS_STUCK,
+        "seconds_since_last_advertisement": round(STALE_RESTART_THRESHOLD_SECONDS + 42),
+        "consecutive_restart_failures": STUCK_AFTER_CONSECUTIVE_FAILURES,
+    }

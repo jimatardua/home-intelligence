@@ -223,6 +223,45 @@ one-off.
    nginx block, `ha-proxy` container recreate (confirm current binds via
    `docker inspect` first, same discipline as every other dashboard here).
 
+## Collector health indicator
+
+Added after the ~8h silent stall (see "Real findings") made clear that
+"the process is still running" is not the same as "data is actually
+flowing," and that distinction needs to be visible somewhere a human will
+actually see it, not just buried in `journalctl`.
+
+The collector publishes a third topic, `govee/collector/health` (JSON,
+retained, every flush cycle -- `{"status": "ok"|"stale"|"stuck",
+"seconds_since_last_advertisement": N, "consecutive_restart_failures": N}`),
+which becomes 3 more HA entities via discovery, grouped under their own
+"Govee Collector" device (separate from the 3 physical sensors):
+
+- `binary_sensor.govee_collector_problem` (`device_class: problem`) -- on
+  for either `stale` or `stuck`, off for `ok`. The one entity worth an HA
+  automation/notification on, if that's ever wanted later.
+- `sensor.govee_collector_status` -- the raw status string, for diagnosis.
+- `sensor.govee_collector_seconds_since_last_reading` (`device_class:
+  duration`) -- how long it's actually been since real data arrived.
+
+`status` escalates from `ok` -> `stale` (the watchdog is actively retrying,
+see the earlier "Real findings" entry) -> `stuck` (>= 3 consecutive failed
+restart attempts -- `STUCK_AFTER_CONSECUTIVE_FAILURES` in `collector.py`;
+this is the case that needs a human, since the watchdog alone can't fix a
+genuinely locked BlueZ adapter).
+
+**The dashboard itself surfaces this**, not just HA: `cigar_dashboard`
+reads the same 3 entities (`get_collector_health()` in `govee_history.py`)
+and shows a red banner at the top of `/cigars/` whenever `is_problem` is
+true, with the exact manual-reset commands
+(`RESET_INSTRUCTIONS` in `render.py`) printed directly in the banner --
+copy-pasteable on the spot, no need to go find this doc first. A gap state
+(entities missing/unavailable -- e.g. the collector's MQTT connection is
+down entirely, or HA itself just restarted) is deliberately treated as a
+problem too, not silently hidden -- unlike a single sensor reading (where
+"--" is the right, low-stakes answer for a gap), this indicator's entire
+job is catching anomalies, so "we can't tell" should read as "go check,"
+not as "everything's fine."
+
 ## Known risks / things to watch
 
 - **The `govee-collector` MQTT login has full, unscoped broker access**,
@@ -261,7 +300,7 @@ one-off.
 ## Status
 
 - [x] `govee_collector/` (decode, discovery, collector, systemd unit,
-      deploy.sh) -- 34 tests passing
+      deploy.sh) -- 47 tests passing
 - [x] Mosquitto broker installed, two dedicated logins configured
 - [x] Deployed to mrteeny, verified live via `mosquitto_sub`: all 3
       devices publishing correct discovery config + state
@@ -274,14 +313,32 @@ one-off.
       failure mode live, ~8h of silent staleness, fixed and redeployed --
       see "Real findings")
 - [x] `cigar_dashboard/` (govee_history, render, generate_dashboard,
-      deploy.sh) -- 13 tests passing
+      deploy.sh) -- 23 tests passing
 - [x] Deployed to domus and verified end-to-end: cron entry live, `/cigars/`
       nginx block added, `ha-proxy` recreated with the new bind mount
       (confirmed `/dashboard/` and `/energy-report/` unaffected), real
       multi-device data rendering in `data.json`/`index.html`
+- [x] `https://domus.ardua.com/cigars/data.json` is the same file the
+      page's own client-side JS polls -- served directly by nginx alongside
+      `index.html`, no separate API needed. Confirmed live (HTTP 200,
+      `content-type: application/json`, real current readings + full
+      per-device `humidity_history`/`temp_history` arrays) for anyone who
+      wants to consume the raw timeseries directly rather than the
+      rendered page.
+- [x] Collector health indicator (`binary_sensor.govee_collector_problem`
+      + 2 diagnostic sensors, dashboard banner with the exact manual-reset
+      commands baked in) -- see "Collector health indicator" above,
+      confirmed live: correctly hidden while healthy
+      (`{"is_problem": false, "status": "ok"}` flowing through to the real
+      `data.json`).
 - [ ] Visually reviewed in an actual browser at
       `https://domus.ardua.com/cigars/` (built and verified via `curl`
       and direct file inspection so far, not yet eyeballed live)
+- [ ] The health banner's "problem" visual state hasn't been observed live
+      (only unit-tested + confirmed via the underlying data pipeline) --
+      the original stuck-adapter incident that motivated this happened
+      before the indicator existed, so there's no real "stuck" case to
+      observe it against yet
 - [ ] A genuine 7-day history hasn't accumulated yet -- charts are correct
       given the data that exists, but haven't been seen with a full week
       of real trend lines

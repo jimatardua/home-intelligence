@@ -25,6 +25,7 @@ from bleak import BleakScanner
 
 from govee_collector.decode import GOVEE_MANUFACTURER_ID, SENSORS, decode_h5075
 from govee_collector.discovery import (
+    HEALTH_TOPIC,
     STATUS_PAYLOAD_AVAILABLE,
     STATUS_PAYLOAD_NOT_AVAILABLE,
     STATUS_TOPIC,
@@ -56,6 +57,20 @@ STALE_RESTART_THRESHOLD_SECONDS = 180.0
 # every FLUSH_INTERVAL_SECONDS; systemd's Restart=always remains the final
 # fallback if restarts keep failing indefinitely.
 RESTART_RETRY_INTERVAL_SECONDS = 60.0
+
+# 3 failed restart attempts in a row (>= ~3 minutes of retrying, on top of
+# the 3 minutes it took to detect the stall in the first place) means the
+# watchdog isn't going to fix this on its own -- almost certainly BlueZ's
+# adapter-level discovery state is stuck (org.bluez.Error.InProgress), which
+# needs a real reset (`hciconfig hci0 down`/`up` + `systemctl restart
+# bluetooth`) the collector deliberately doesn't have the privileges to do
+# itself. This is exactly the distinction the "Problem"/"Status" HA
+# entities (discovery.py) exist to surface -- see docs/govee-cigar-monitor.md.
+STUCK_AFTER_CONSECUTIVE_FAILURES = 3
+
+HEALTH_STATUS_OK = "ok"
+HEALTH_STATUS_STALE = "stale"
+HEALTH_STATUS_STUCK = "stuck"
 
 
 @dataclass(frozen=True)
@@ -129,6 +144,28 @@ def should_attempt_restart(last_advertisement_at: float, last_restart_attempt_at
     return is_stale(last_advertisement_at, now) and (now - last_restart_attempt_at) > RESTART_RETRY_INTERVAL_SECONDS
 
 
+def compute_health_status(last_advertisement_at: float, consecutive_restart_failures: int, now: float) -> str:
+    """"ok" while advertisements are arriving normally; "stale" once the
+    watchdog notices a gap but is still within its retry budget; "stuck"
+    once retries have been exhausted and a human needs to intervene (see
+    STUCK_AFTER_CONSECUTIVE_FAILURES)."""
+    if not is_stale(last_advertisement_at, now):
+        return HEALTH_STATUS_OK
+    if consecutive_restart_failures >= STUCK_AFTER_CONSECUTIVE_FAILURES:
+        return HEALTH_STATUS_STUCK
+    return HEALTH_STATUS_STALE
+
+
+def build_health_payload(last_advertisement_at: float, consecutive_restart_failures: int, now: float) -> str:
+    return json.dumps(
+        {
+            "status": compute_health_status(last_advertisement_at, consecutive_restart_failures, now),
+            "seconds_since_last_advertisement": round(now - last_advertisement_at),
+            "consecutive_restart_failures": consecutive_restart_failures,
+        }
+    )
+
+
 def _publish_discovery(client: mqtt.Client) -> None:
     for topic, payload in all_discovery_messages():
         client.publish(topic, json.dumps(payload), qos=1, retain=True)
@@ -164,12 +201,14 @@ async def run() -> None:
     state: dict[str, DeviceState] = {}
     client = _build_client()
     last_advertisement_at = time.time()
+    consecutive_restart_failures = 0
 
     def callback(device, adv) -> None:
-        nonlocal state, last_advertisement_at
+        nonlocal state, last_advertisement_at, consecutive_restart_failures
         updated = apply_advertisement(state, device.address, adv.manufacturer_data, adv.rssi)
         if updated is not state:  # a real Govee decode, not just BLE noise from other devices
             last_advertisement_at = time.time()
+            consecutive_restart_failures = 0  # proof the scan session is genuinely healthy again
         state = updated
 
     scanner = BleakScanner(callback)
@@ -204,7 +243,21 @@ async def run() -> None:
                     # crash: log and let the next watchdog check retry,
                     # with systemd's Restart=always as the final fallback
                     # if this process ever exits some other way.
-                    LOGGER.exception("Failed to restart the BLE scan session -- will retry")
+                    consecutive_restart_failures += 1
+                    LOGGER.exception(
+                        "Failed to restart the BLE scan session (%d consecutive failures) -- will retry",
+                        consecutive_restart_failures,
+                    )
+
+            health_status = compute_health_status(last_advertisement_at, consecutive_restart_failures, now)
+            if health_status != HEALTH_STATUS_OK:
+                LOGGER.warning("Collector health: %s", health_status)
+            client.publish(
+                HEALTH_TOPIC,
+                build_health_payload(last_advertisement_at, consecutive_restart_failures, now),
+                qos=1,
+                retain=True,
+            )
 
             for device_id, device_state in state.items():
                 client.publish(state_topic(device_id), build_state_payload(device_state), qos=1, retain=True)

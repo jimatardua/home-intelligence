@@ -37,12 +37,30 @@ def _entity_id(device_id: str, metric: str) -> str:
     return f"sensor.{DEVICE_LABELS[device_id].lower()}_{device_id.lower()}_{metric}"
 
 
+# Gap states the recorder can hold that mean "no real value," not
+# literally "off"/"0" -- same convention energy_report.ha_recorder uses
+# internally, applied here at the raw-string level before this module's
+# own True/False interpretation of the "problem" binary_sensor.
+_GAP_STATES = frozenset({"unknown", "unavailable", "none", ""})
+
+COLLECTOR_PROBLEM_ENTITY = "binary_sensor.govee_collector_problem"
+COLLECTOR_STATUS_ENTITY = "sensor.govee_collector_status"
+COLLECTOR_STALE_SECONDS_ENTITY = "sensor.govee_collector_seconds_since_last_reading"
+
+
 @dataclass(frozen=True)
 class DeviceReading:
     label: str
     temp_f: float | None
     humidity_pct: float | None
     battery_pct: float | None
+
+
+@dataclass(frozen=True)
+class CollectorHealth:
+    is_problem: bool
+    status: str | None  # "ok" / "stale" / "stuck", or None if genuinely unknown
+    seconds_since_last_reading: float | None
 
 
 @dataclass(frozen=True)
@@ -78,6 +96,31 @@ def get_current_readings(conn: sqlite3.Connection) -> dict[str, DeviceReading]:
         )
         for device_id in DEVICE_IDS
     }
+
+
+def get_collector_health(conn: sqlite3.Connection) -> CollectorHealth:
+    """Current health of the govee_collector daemon itself (mrteeny), not
+    any one device's reading -- see docs/govee-cigar-monitor.md.
+
+    A gap state (entity missing/unavailable/unknown -- e.g. HA just
+    restarted, or the collector's MQTT connection is down entirely, per its
+    LWT) is treated as a problem too, not silently ignored: unlike a single
+    sensor reading (where "--" is the honest, low-stakes answer for a gap),
+    this entity's entire purpose is catching anomalies, so "we can't tell"
+    should read as "something to check," not as "everything's fine."
+    """
+    problem_raw = get_latest_state(conn, COLLECTOR_PROBLEM_ENTITY)
+    status_raw = get_latest_state(conn, COLLECTOR_STATUS_ENTITY)
+    seconds_raw = get_latest_state(conn, COLLECTOR_STALE_SECONDS_ENTITY)
+
+    problem_is_gap = problem_raw is None or problem_raw.lower() in _GAP_STATES
+    status_is_gap = status_raw is None or status_raw.lower() in _GAP_STATES
+
+    return CollectorHealth(
+        is_problem=problem_is_gap or problem_raw.lower() == "on",
+        status=None if status_is_gap else status_raw,
+        seconds_since_last_reading=_float_or_none(seconds_raw),
+    )
 
 
 def _history(conn: sqlite3.Connection, entity_id: str, now_local: datetime, days: int) -> list[HistoryPoint]:

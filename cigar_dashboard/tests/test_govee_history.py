@@ -5,7 +5,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from cigar_dashboard.govee_history import get_current_readings, get_humidity_history, get_temp_history
+from cigar_dashboard.govee_history import (
+    get_collector_health,
+    get_current_readings,
+    get_humidity_history,
+    get_temp_history,
+)
 
 LOCAL_TZ = timezone(timedelta(hours=-6))
 
@@ -113,3 +118,59 @@ def test_get_temp_history_less_than_seven_days_of_data_is_not_an_error(conn):
     history = get_temp_history(conn, now, days=7)
 
     assert [p.value for p in history["TH01"]] == pytest.approx([68.0])
+
+
+def test_get_collector_health_ok(conn):
+    now = datetime(2026, 8, 8, 8, 0, tzinfo=LOCAL_TZ)
+    _add_entity(conn, 1, "binary_sensor.govee_collector_problem")
+    _add_state(conn, 1, "off", now)
+    _add_entity(conn, 2, "sensor.govee_collector_status")
+    _add_state(conn, 2, "ok", now)
+    _add_entity(conn, 3, "sensor.govee_collector_seconds_since_last_reading")
+    _add_state(conn, 3, "4", now)
+
+    health = get_collector_health(conn)
+
+    assert health.is_problem is False
+    assert health.status == "ok"
+    assert health.seconds_since_last_reading == pytest.approx(4.0)
+
+
+def test_get_collector_health_problem_when_binary_sensor_on(conn):
+    now = datetime(2026, 8, 8, 8, 0, tzinfo=LOCAL_TZ)
+    _add_entity(conn, 1, "binary_sensor.govee_collector_problem")
+    _add_state(conn, 1, "on", now)
+    _add_entity(conn, 2, "sensor.govee_collector_status")
+    _add_state(conn, 2, "stuck", now)
+    _add_entity(conn, 3, "sensor.govee_collector_seconds_since_last_reading")
+    _add_state(conn, 3, "612", now)
+
+    health = get_collector_health(conn)
+
+    assert health.is_problem is True
+    assert health.status == "stuck"
+    assert health.seconds_since_last_reading == pytest.approx(612.0)
+
+
+def test_get_collector_health_treats_gap_as_problem_not_silently_ok(conn):
+    # No entities at all -- e.g. HA just restarted, or the collector's MQTT
+    # connection is down entirely. Unlike a single sensor reading, "we
+    # can't tell" here should surface as something to check, not as quietly
+    # assuming everything is fine.
+    health = get_collector_health(conn)
+
+    assert health.is_problem is True
+    assert health.status is None
+
+
+def test_get_collector_health_treats_unavailable_state_as_problem(conn):
+    now = datetime(2026, 8, 8, 8, 0, tzinfo=LOCAL_TZ)
+    _add_entity(conn, 1, "binary_sensor.govee_collector_problem")
+    _add_state(conn, 1, "unavailable", now)
+    _add_entity(conn, 2, "sensor.govee_collector_status")
+    _add_state(conn, 2, "unavailable", now)
+
+    health = get_collector_health(conn)
+
+    assert health.is_problem is True
+    assert health.status is None

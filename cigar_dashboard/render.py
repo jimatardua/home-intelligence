@@ -17,12 +17,23 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from cigar_dashboard.govee_history import DEVICE_IDS, DeviceReading, HistoryPoint
+from cigar_dashboard.govee_history import DEVICE_IDS, CollectorHealth, DeviceReading, HistoryPoint
 
 BG_COLOR = "#0b0e14"
 CARD_COLOR = "#161b26"
 TEXT_COLOR = "#f2f4f8"
 MUTED_COLOR = "#8b93a7"
+WARN_COLOR = "#ef4444"
+
+# Shown verbatim in the health banner when the collector needs manual
+# attention -- the exact sequence that fixed the one real BlueZ-adapter
+# lockup found live (2026-08-08); see docs/govee-cigar-monitor.md. Kept as
+# one source of truth here rather than only in the docs, since this is the
+# moment someone actually needs it, not when they're reading the docs.
+RESET_INSTRUCTIONS = (
+    "sudo hciconfig hci0 down && sudo hciconfig hci0 up && sudo systemctl restart bluetooth\n"
+    "sudo systemctl restart govee-collector"
+)
 
 # One fixed color per device, used consistently across both charts and any
 # per-device legend/swatch -- so "blue" always means Wineador, everywhere
@@ -40,6 +51,9 @@ class DashboardContext:
     readings: dict[str, DeviceReading]
     humidity_history: dict[str, list[HistoryPoint]] = field(default_factory=dict)
     temp_history: dict[str, list[HistoryPoint]] = field(default_factory=dict)
+    collector_health: CollectorHealth = field(
+        default_factory=lambda: CollectorHealth(is_problem=False, status=None, seconds_since_last_reading=None)
+    )
 
 
 def _fmt_pct(v: float | None) -> str:
@@ -72,11 +86,26 @@ def _data_dict(ctx: DashboardContext) -> dict:
         },
         "humidity_history": _history_dict(ctx.humidity_history),
         "temp_history": _history_dict(ctx.temp_history),
+        "collector_health": {
+            "is_problem": ctx.collector_health.is_problem,
+            "status": ctx.collector_health.status,
+            "seconds_since_last_reading": ctx.collector_health.seconds_since_last_reading,
+        },
     }
 
 
 def render_data_json(ctx: DashboardContext) -> str:
     return json.dumps(_data_dict(ctx))
+
+
+def _health_message(health: CollectorHealth) -> str:
+    if health.status == "stuck":
+        return "BLE scan session appears stuck -- automatic retries have failed. Manual reset needed:"
+    if health.status == "stale":
+        seconds = health.seconds_since_last_reading
+        age = f"{seconds:.0f}s" if seconds is not None else "a while"
+        return f"No fresh reading in {age} -- the collector is retrying automatically."
+    return "Collector health unknown -- entity data missing or unavailable."
 
 
 def _device_cards_html(ctx: DashboardContext) -> str:
@@ -99,6 +128,8 @@ def _device_cards_html(ctx: DashboardContext) -> str:
 
 def render_html(ctx: DashboardContext) -> str:
     initial_data = json.dumps(_data_dict(ctx))
+    banner_display = "flex" if ctx.collector_health.is_problem else "none"
+    banner_message = _health_message(ctx.collector_health)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -127,6 +158,9 @@ h1{{font-size:min(4vw,28px);font-weight:800}}
 .legend{{display:flex;gap:18px;margin-top:8px;flex-wrap:wrap}}
 .legend-item{{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}}
 .legend-swatch{{width:10px;height:10px;border-radius:2px;display:inline-block}}
+.health-banner{{background:#3a1414;border:1px solid {WARN_COLOR};border-radius:var(--r);padding:2vh 2vw;flex-direction:column;gap:8px}}
+.health-banner-message{{color:{WARN_COLOR};font-weight:700;font-size:15px}}
+.health-banner-fix{{background:{BG_COLOR};border-radius:8px;padding:10px 12px;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--text);white-space:pre-wrap;overflow-x:auto}}
 @media(max-width:700px){{.cards{{grid-template-columns:1fr}}}}
 </style>
 </head>
@@ -135,6 +169,11 @@ h1{{font-size:min(4vw,28px);font-weight:800}}
 <div>
   <h1>Cigar Storage</h1>
   <div class="generated-at" id="generated-at"></div>
+</div>
+
+<div class="health-banner" id="health-banner" style="display:{banner_display}">
+  <div class="health-banner-message" id="health-banner-message">{banner_message}</div>
+  <pre class="health-banner-fix" id="health-banner-fix">{RESET_INSTRUCTIONS}</pre>
 </div>
 
 <div class="cards">
@@ -222,8 +261,28 @@ function drawMultiSeries(svgEl, legendEl, histories, devices, unitSuffix) {{
   svgEl.innerHTML = svgHtml;
 }}
 
+function applyHealth(health) {{
+  const banner = document.getElementById('health-banner');
+  const message = document.getElementById('health-banner-message');
+  const isProblem = !health || health.is_problem;
+  banner.style.display = isProblem ? 'flex' : 'none';
+  if (!isProblem) return;
+
+  if (health.status === 'stuck') {{
+    message.textContent = 'BLE scan session appears stuck -- automatic retries have failed. Manual reset needed:';
+  }} else if (health.status === 'stale') {{
+    const seconds = health.seconds_since_last_reading;
+    const age = seconds != null ? Math.round(seconds) + 's' : 'a while';
+    message.textContent = 'No fresh reading in ' + age + ' -- the collector is retrying automatically.';
+  }} else {{
+    message.textContent = 'Collector health unknown -- entity data missing or unavailable.';
+  }}
+}}
+
 function applyData(d) {{
   document.getElementById('generated-at').textContent = 'Updated ' + new Date(d.generated_at).toLocaleTimeString([], {{hour: 'numeric', minute: '2-digit'}});
+
+  applyHealth(d.collector_health);
 
   Object.entries(d.devices || {{}}).forEach(([id, dev]) => {{
     const humidityEl = document.getElementById('humidity-' + id);
