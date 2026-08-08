@@ -6,6 +6,24 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.28] - 2026-08-08
+
+- Fix a real reliability gap in the Govee cigar-storage collector (1.0.27),
+  found live the morning after deployment: BLE advertisement delivery can
+  silently stop while the systemd service keeps running and stays
+  MQTT-connected -- no crash, no error, just no more data, undetected for
+  ~8 hours. Root cause not directly provable (a journald gap on mrteeny
+  covered the actual failure window), but strong circumstantial evidence
+  points to a second independent BLE-scanning script left running
+  overnight contending for the one adapter -- recovering the collector
+  required a real `hciconfig`/`bluetooth` adapter reset, and the restart
+  attempt itself failed first with the textbook BlueZ contention error
+  (`org.bluez.Error.InProgress`). Added a self-healing watchdog
+  (`is_stale()`/`should_attempt_restart()`, both pure and unit-tested):
+  if no real advertisement lands within 3 minutes, the collector restarts
+  its own BLE scan session automatically, well inside the 5-minute HA
+  `expire_after` window. 7 new tests (34 total in `govee_collector`).
+
 ## [1.0.27] - 2026-08-07
 
 - Add cigar-storage environment monitoring: 3 Govee H5075 BLE

@@ -126,6 +126,36 @@ one-off.
   differently-shaped, redundant set of entities with no continuity with
   what this package's dashboard reads. Worth remembering this card may
   keep reappearing; it should stay ignored/dismissed, not added.
+- **BLE advertisement delivery can silently stop while the process keeps
+  running, with no crash and no error** -- found live (2026-08-08), not
+  theoretical: the collector went ~8 hours without a real update, still
+  "active" the whole time and still MQTT-connected (LWT stayed "online"),
+  just no more advertisements arriving. Root cause not directly provable
+  (mrteeny's journald had a gap across the actual failure window), but
+  strong circumstantial evidence points to a second, independent BLE
+  scanner (a separate script, `table.py`, left running overnight reading
+  the same 3 devices) contending for the one adapter -- when the collector
+  was later restarted to recover, it failed outright with
+  `org.bluez.Error.InProgress` ("Operation already in progress"), the
+  textbook BlueZ symptom of exactly that kind of contention. Recovery
+  needed a real adapter-level reset (`hciconfig hci0 down`/`up` +
+  `systemctl restart bluetooth`) -- restarting just `bluetoothd` alone was
+  not sufficient, and neither was restarting the collector process itself
+  (it kept hitting the same `InProgress` error on every retry). **Fixed
+  with a self-healing watchdog** (`is_stale()`/`should_attempt_restart()`
+  in `collector.py`, both pure and unit-tested): if no real Govee
+  advertisement lands within 3 minutes (deliberately far inside the
+  5-minute HA `expire_after`, so this self-heals before HA would ever mark
+  anything unavailable), the collector stops and restarts its own
+  `BleakScanner` session, with a 60s cooldown between attempts so a
+  genuinely stuck adapter doesn't get hammered. This does **not** cover
+  the harder BlueZ-adapter-lockup case (the `InProgress` failure mode) --
+  that needs a lower-level reset the collector can't perform without
+  additional privileges it deliberately doesn't have (`User=jramsey`, no
+  `bluetooth` group, no `CAP_NET_ADMIN`); see "Known risks" below.
+  **Practical takeaway: don't run any other independent BLE-scanning
+  script against this adapter while the collector is live** -- confirmed
+  the two are not safe to run concurrently.
 
 ## File layout
 
@@ -216,11 +246,22 @@ one-off.
 - **7-day chart with less than 7 days of data** (the real state on day 1)
   is explicitly tested (`test_get_temp_history_less_than_seven_days_of_data_is_not_an_error`)
   and renders correctly -- not just assumed to work.
+- **The watchdog can't recover from a genuinely stuck BlueZ adapter**
+  (`org.bluez.Error.InProgress`) on its own -- that needed a manual
+  `hciconfig hci0 down`/`up` + `bluetooth` service restart once, live (see
+  "Real findings"). If this recurs and `Restart=always` ends up
+  crash-looping indefinitely instead of self-healing, that's the fix:
+  `sudo hciconfig hci0 down && sudo hciconfig hci0 up && sudo systemctl
+  restart bluetooth`, then `sudo systemctl restart govee-collector`.
+  Giving the collector enough privilege to do this itself (root, or
+  `CAP_NET_ADMIN`) was deliberately not done -- a real tradeoff against
+  this project's least-privilege habits, worth revisiting only if manual
+  recovery becomes a recurring, not one-off, annoyance.
 
 ## Status
 
 - [x] `govee_collector/` (decode, discovery, collector, systemd unit,
-      deploy.sh) -- 27 tests passing
+      deploy.sh) -- 34 tests passing
 - [x] Mosquitto broker installed, two dedicated logins configured
 - [x] Deployed to mrteeny, verified live via `mosquitto_sub`: all 3
       devices publishing correct discovery config + state
@@ -229,6 +270,9 @@ one-off.
       `unit_of_measurement`, real values landing in the recorder DB
 - [x] LWT + `expire_after` staleness tested live (stop/restart the
       collector, watched entities flip unavailable and recover)
+- [x] Self-healing watchdog for silent BLE scan stalls (found the real
+      failure mode live, ~8h of silent staleness, fixed and redeployed --
+      see "Real findings")
 - [x] `cigar_dashboard/` (govee_history, render, generate_dashboard,
       deploy.sh) -- 13 tests passing
 - [x] Deployed to domus and verified end-to-end: cron entry live, `/cigars/`

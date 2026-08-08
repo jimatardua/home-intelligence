@@ -38,6 +38,25 @@ FLUSH_INTERVAL_SECONDS = 15.0
 MQTT_PORT = 1883
 MQTT_KEEPALIVE_SECONDS = 60
 
+# Found live (2026-08-08): BLE advertisement delivery can silently stop
+# while the process itself keeps running and stays MQTT-connected -- no
+# exception, no crash, just no more callbacks. Most likely cause: a second
+# process independently scanning the same adapter (BlueZ has no clean
+# multi-client discovery story; observed symptom on the *next* restart
+# attempt was `org.bluez.Error.InProgress`, the classic contention error).
+# Went undetected for ~8 hours because nothing was watching for it -- this
+# threshold is deliberately far inside the 5-minute HA `expire_after`
+# (discovery.py) so a stall self-heals before HA ever marks anything
+# unavailable, rather than relying on a human noticing stale numbers.
+STALE_RESTART_THRESHOLD_SECONDS = 180.0
+
+# Restarting the BLE scan session is itself not guaranteed to succeed if
+# BlueZ's adapter-level discovery state is stuck (that InProgress error
+# above) -- this cooldown stops the watchdog from hammering a stuck adapter
+# every FLUSH_INTERVAL_SECONDS; systemd's Restart=always remains the final
+# fallback if restarts keep failing indefinitely.
+RESTART_RETRY_INTERVAL_SECONDS = 60.0
+
 
 @dataclass(frozen=True)
 class DeviceState:
@@ -100,6 +119,16 @@ def build_state_payload(device_state: DeviceState) -> str:
     )
 
 
+def is_stale(last_advertisement_at: float, now: float) -> bool:
+    return (now - last_advertisement_at) > STALE_RESTART_THRESHOLD_SECONDS
+
+
+def should_attempt_restart(last_advertisement_at: float, last_restart_attempt_at: float, now: float) -> bool:
+    """Pure decision logic, unit-testable without asyncio/bleak: stale AND
+    not still cooling down from a recent restart attempt."""
+    return is_stale(last_advertisement_at, now) and (now - last_restart_attempt_at) > RESTART_RETRY_INTERVAL_SECONDS
+
+
 def _publish_discovery(client: mqtt.Client) -> None:
     for topic, payload in all_discovery_messages():
         client.publish(topic, json.dumps(payload), qos=1, retain=True)
@@ -134,18 +163,49 @@ def _build_client() -> mqtt.Client:
 async def run() -> None:
     state: dict[str, DeviceState] = {}
     client = _build_client()
+    last_advertisement_at = time.time()
 
     def callback(device, adv) -> None:
-        nonlocal state
-        state = apply_advertisement(state, device.address, adv.manufacturer_data, adv.rssi)
+        nonlocal state, last_advertisement_at
+        updated = apply_advertisement(state, device.address, adv.manufacturer_data, adv.rssi)
+        if updated is not state:  # a real Govee decode, not just BLE noise from other devices
+            last_advertisement_at = time.time()
+        state = updated
 
     scanner = BleakScanner(callback)
     await scanner.start()
     LOGGER.info("Scanning for Govee sensors...")
+    last_restart_attempt_at = 0.0
 
     try:
         while True:
             await asyncio.sleep(FLUSH_INTERVAL_SECONDS)
+            now = time.time()
+
+            if should_attempt_restart(last_advertisement_at, last_restart_attempt_at, now):
+                LOGGER.warning(
+                    "No Govee advertisement in %.0fs -- restarting the BLE scan session",
+                    now - last_advertisement_at,
+                )
+                last_restart_attempt_at = now
+                try:
+                    await scanner.stop()
+                except Exception:
+                    LOGGER.exception("Error stopping the stalled scanner (continuing anyway)")
+                try:
+                    scanner = BleakScanner(callback)
+                    await scanner.start()
+                    last_advertisement_at = time.time()  # give the fresh session a full window
+                    LOGGER.info("BLE scan session restarted successfully")
+                except Exception:
+                    # Most likely BlueZ's adapter-level discovery state is
+                    # itself stuck (org.bluez.Error.InProgress) -- a plain
+                    # scanner restart can't fix that on its own. Don't
+                    # crash: log and let the next watchdog check retry,
+                    # with systemd's Restart=always as the final fallback
+                    # if this process ever exits some other way.
+                    LOGGER.exception("Failed to restart the BLE scan session -- will retry")
+
             for device_id, device_state in state.items():
                 client.publish(state_topic(device_id), build_state_payload(device_state), qos=1, retain=True)
                 LOGGER.debug("Published %s: %s", device_id, device_state)

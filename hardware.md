@@ -95,6 +95,16 @@
   flow (which defaults to blank username/password) until a second,
   dedicated `homeassistant` login was added alongside the collector's own
   `govee-collector` login. Full writeup in `docs/govee-cigar-monitor.md`.
+- **Do not run another independent BLE-scanning script on mrteeny while
+  `govee-collector` is live.** Found live (2026-08-08): a second script
+  reading the same 3 sensors, left running overnight, coincided with the
+  collector going ~8 hours silently stale and later failing to restart
+  with `org.bluez.Error.InProgress` -- BlueZ has no clean multi-client
+  discovery story on one adapter. Needed a real adapter reset to recover
+  (`hciconfig hci0 down`/`up` + `systemctl restart bluetooth`). The
+  collector now has a self-healing watchdog for silent stalls, but not for
+  a fully stuck adapter -- see `docs/govee-cigar-monitor.md`'s "Known
+  risks" for the manual recovery command if this happens again.
 
 ## HVAC
 

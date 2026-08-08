@@ -4,7 +4,15 @@ import json
 
 import pytest
 
-from govee_collector.collector import DeviceState, apply_advertisement, build_state_payload
+from govee_collector.collector import (
+    RESTART_RETRY_INTERVAL_SECONDS,
+    STALE_RESTART_THRESHOLD_SECONDS,
+    DeviceState,
+    apply_advertisement,
+    build_state_payload,
+    is_stale,
+    should_attempt_restart,
+)
 from govee_collector.decode import GOVEE_MANUFACTURER_ID
 
 
@@ -84,3 +92,52 @@ def test_build_state_payload_shape_and_rounding():
     payload = json.loads(build_state_payload(state))
 
     assert payload == {"temp_f": 68.9, "humidity_pct": 65.2, "battery_pct": 92, "rssi": -61}
+
+
+def test_is_stale_false_when_advertisement_recent():
+    now = 1000.0
+    assert is_stale(last_advertisement_at=now - 10, now=now) is False
+
+
+def test_is_stale_false_exactly_at_threshold():
+    now = 1000.0
+    assert is_stale(last_advertisement_at=now - STALE_RESTART_THRESHOLD_SECONDS, now=now) is False
+
+
+def test_is_stale_true_past_threshold():
+    now = 1000.0
+    assert is_stale(last_advertisement_at=now - STALE_RESTART_THRESHOLD_SECONDS - 1, now=now) is True
+
+
+def test_should_attempt_restart_true_when_stale_and_no_recent_restart():
+    now = 1000.0
+    last_advertisement_at = now - STALE_RESTART_THRESHOLD_SECONDS - 1
+    last_restart_attempt_at = 0.0  # never attempted
+
+    assert should_attempt_restart(last_advertisement_at, last_restart_attempt_at, now) is True
+
+
+def test_should_attempt_restart_false_when_not_stale():
+    now = 1000.0
+    last_advertisement_at = now - 5  # fresh
+    last_restart_attempt_at = 0.0
+
+    assert should_attempt_restart(last_advertisement_at, last_restart_attempt_at, now) is False
+
+
+def test_should_attempt_restart_false_during_cooldown():
+    # Stale, but a restart was just attempted -- must not hammer BlueZ every
+    # flush cycle if the underlying adapter state is genuinely stuck.
+    now = 1000.0
+    last_advertisement_at = now - STALE_RESTART_THRESHOLD_SECONDS - 1
+    last_restart_attempt_at = now - (RESTART_RETRY_INTERVAL_SECONDS - 1)
+
+    assert should_attempt_restart(last_advertisement_at, last_restart_attempt_at, now) is False
+
+
+def test_should_attempt_restart_true_after_cooldown_elapses():
+    now = 1000.0
+    last_advertisement_at = now - STALE_RESTART_THRESHOLD_SECONDS - 1
+    last_restart_attempt_at = now - (RESTART_RETRY_INTERVAL_SECONDS + 1)
+
+    assert should_attempt_restart(last_advertisement_at, last_restart_attempt_at, now) is True
