@@ -173,26 +173,39 @@ Raw JSON archive (one file per day)
 - **`__init__.py`** — standard `async_setup_entry` / `async_unload_entry`,
   creates the client + coordinator, stores the coordinator on
   `entry.runtime_data`, forwards to the `sensor` platform.
-- **`sensor.py`** — one entity, `sensor.rocky_mountain_power_hourly_usage`,
-  that exists purely so third-party dashboard cards (e.g. apexcharts-card)
-  can chart this data — they require an entity to exist in `hass.states`,
-  which the colon-form external statistic above deliberately doesn't have.
-  Its live state is just "the latest known hourly value"; the real
-  backdated hourly curve lives in this entity's own long-term statistics,
-  injected in parallel by the coordinator via
-  `async_import_statistics(source="recorder")`. Deliberately has no
-  `state_class`, so it's excluded from HA's own automatic statistics
-  compilation (which would otherwise fight with our backdated imports).
-  See "Known risks" for a sharp edge this design hit.
+- **`sensor.py`** — three entities:
+  - `sensor.rocky_mountain_power_hourly_usage` exists purely so
+    third-party dashboard cards (e.g. apexcharts-card) can chart this data
+    — they require an entity to exist in `hass.states`, which the
+    colon-form external statistic above deliberately doesn't have. Its
+    live state is just "the latest known hourly value"; the real
+    backdated hourly curve lives in this entity's own long-term
+    statistics, injected in parallel by the coordinator via
+    `async_import_statistics(source="recorder")`. Deliberately has no
+    `state_class`, so it's excluded from HA's own automatic statistics
+    compilation (which would otherwise fight with our backdated imports).
+    See "Known risks" for a sharp edge this design hit.
+  - `sensor.rocky_mountain_power_sync_status` and
+    `sensor.rocky_mountain_power_hours_since_last_sync` — see "Staleness
+    alert" below.
 - **`diagnostics.py`** — Settings → Devices & Services → Rocky Mountain
   Power → Download Diagnostics. Exposes: `authenticated`,
   `last_successful_sync`, agreement IDs (redacted), `latest_interval_date`,
-  `last_poll_duration_seconds`, and `site_bundle_signature` — the hash
+  `last_poll_duration_seconds`, `sync_status`, and `last_exception` (see
+  "Staleness alert" below), and `site_bundle_signature` — the hash
   fragment of RMP's frontend JS bundle captured at login (e.g.
   `main.c90d73ab362aa7afda39.js`). This doubles as an early-warning canary:
   if it changes between polls, RMP shipped a new frontend build, which is
   exactly the kind of change that could silently break `parse_settings()`
   or the request-encryption contract.
+- **`health.py`** — pure, HA-independent `compute_sync_status()`, the
+  ok/stale/stuck decision logic behind the staleness-alert entities below.
+  Deliberately has no `homeassistant` import, mirroring the same
+  separation `govee_collector/collector.py` keeps between its pure
+  decision logic and its asyncio-dependent code, and for the same reason:
+  it's what lets `tests/test_health.py` unit-test it directly.
+- **`binary_sensor.py`** — `binary_sensor.rocky_mountain_power_sync_problem`,
+  the "is something wrong" entity. See "Staleness alert" below.
 - **`manifest.json` / `strings.json`** — standard HA integration metadata
   and config-flow field labels/error strings.
 
@@ -251,6 +264,46 @@ could fail forever, not just once. Covered by
 `custom_components/rocky_mountain_power/tests/test_api.py` (mocked, no
 live credentials -- see that file's docstring for the unusual pytest
 invocation it needs to avoid importing `__init__.py`'s HA dependency).
+
+## Staleness alert
+
+The incident above ran for 11 days with nothing visible anywhere. Fixing
+the underlying session bug closes that specific failure mode, but not the
+general gap: if the daily sync breaks for any reason, nobody finds out
+until someone happens to check. `custom_components/rocky_mountain_power/health.py`
+adds the same `ok`/`stale`/`stuck` alerting `govee_collector` already has
+for its BLE watchdog, computed from `coordinator.last_successful_sync`
+(set only at the very end of a fully successful poll, so a failing poll
+leaves it frozen at its last real value — exactly the signal needed):
+
+- **ok**: under 30h since the last success (one daily cycle plus a few
+  hours' grace).
+- **stale**: 30–54h (about one missed cycle — still plausibly self-healing
+  on the coordinator's own next attempt).
+- **stuck**: over 54h (about two or more consecutive missed cycles). This
+  threshold is meant to catch a repeat of the July incident on day 3, not
+  day 11.
+
+Three entities surface this:
+
+- `binary_sensor.rocky_mountain_power_sync_problem` (device_class
+  `problem`) — on whenever status isn't `ok`.
+- `sensor.rocky_mountain_power_sync_status` — `ok`/`stale`/`stuck`, with
+  `last_successful_sync` and `last_exception` as attributes for whoever's
+  actually debugging a problem.
+- `sensor.rocky_mountain_power_hours_since_last_sync` — numeric hours, not
+  seconds (unlike `govee_collector`'s near-real-time watchdog, this
+  integration polls once daily, so hours is the readable unit here).
+
+`energy_report` (this integration's dashboard, the same relationship
+`cigar_dashboard` has to `govee_collector`) shows a banner with baked-in
+fix instructions — *"Settings → Devices & Services → Rocky Mountain Power
+→ ⋮ → Reload"*, the exact, confirmed fix for the incident above — whenever
+`binary_sensor.rocky_mountain_power_sync_problem` is on. It's
+server-rendered only: `energy_report` regenerates hourly via cron and
+reloads via `<meta http-equiv="refresh">`, not client-side polling, so
+there's no live redraw wiring needed the way `cigar_dashboard`'s banner
+needs for its `themechange`-driven charts.
 
 ## Known risks / things to watch
 
@@ -319,3 +372,8 @@ invocation it needs to avoid importing `__init__.py`'s HA dependency).
       `last_successful_sync`, `last_poll_duration_seconds`,
       `latest_interval_date`, `site_bundle_signature`, redacted
       `agreement_ids`) is populated correctly.
+- [x] Staleness alert (`health.py`, `binary_sensor.py`, the two new
+      `sensor.py` entities, `energy_report`'s health banner) added
+      2026-08-13 after checking in on RMP status prompted a look back at
+      the unresolved "nothing alerts on a repeat of the July incident"
+      gap. See "Staleness alert" above.

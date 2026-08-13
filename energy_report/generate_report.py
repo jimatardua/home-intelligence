@@ -28,10 +28,11 @@ from .disaggregation import disaggregate_hour
 from .ha_recorder import (
     get_binary_sensor_intervals,
     get_gated_temperature_samples,
+    get_latest_state,
     get_numeric_sensor_samples,
     open_recorder_db,
 )
-from .render import DailyBreakdown, LeverRow, ReportContext, render_report
+from .render import DailyBreakdown, LeverRow, ReportContext, RmpSyncHealth, render_report
 from .sensitivity import (
     billable_hours_from_disaggregation,
     build_sensitivity_table,
@@ -73,6 +74,42 @@ DAYS_SEASONAL = 60
 AVG_DAYS_PER_MONTH = 30.44
 DAYS_PER_YEAR = 365.25
 
+# custom_components/rocky_mountain_power's staleness-alert entities -- see
+# that integration's health.py for the ok/stale/stuck decision logic these
+# reflect, and docs/rmp-integration.md's "Staleness alert" section for why.
+RMP_SYNC_PROBLEM_ENTITY = "binary_sensor.rocky_mountain_power_sync_problem"
+RMP_SYNC_STATUS_ENTITY = "sensor.rocky_mountain_power_sync_status"
+RMP_HOURS_SINCE_SYNC_ENTITY = "sensor.rocky_mountain_power_hours_since_last_sync"
+
+
+def _float_or_none(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _get_rmp_sync_health(conn) -> RmpSyncHealth:
+    """Mirrors cigar_dashboard/govee_history.py's get_collector_health()
+    exactly. A gap state (entity missing/unavailable -- e.g. HA just
+    restarted, or the RMP integration was removed) is treated as a problem
+    too, not silently ignored -- same reasoning as that function's
+    docstring: this entity's whole purpose is catching anomalies, so "we
+    can't tell" should read as "something to check."
+    """
+    problem_raw = get_latest_state(conn, RMP_SYNC_PROBLEM_ENTITY)
+    status_raw = get_latest_state(conn, RMP_SYNC_STATUS_ENTITY)
+    hours_raw = get_latest_state(conn, RMP_HOURS_SINCE_SYNC_ENTITY)
+
+    is_gap = problem_raw is None or status_raw is None
+    return RmpSyncHealth(
+        is_problem=is_gap or problem_raw.lower() == "on",
+        status=status_raw,
+        hours_since_last_sync=_float_or_none(hours_raw),
+    )
+
 
 def _maturity_tier(day_count: int, seasons_observed: set[str]) -> str:
     if day_count < DAYS_INSUFFICIENT:
@@ -85,6 +122,14 @@ def _maturity_tier(day_count: int, seasons_observed: set[str]) -> str:
 def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
     generated_at = dt_module.datetime.now().astimezone()
     readings = load_archive(archive_dir)
+
+    # Opened unconditionally, even when there's no archive data yet -- RMP
+    # sync health is a separate system (the HA integration's own coordinator)
+    # from this report's local archive, and is exactly the kind of thing
+    # worth surfacing *especially* right after a fresh deploy before any
+    # archive days exist.
+    conn = open_recorder_db(db_path)
+    rmp_sync_health = _get_rmp_sync_health(conn)
 
     if not readings:
         return ReportContext(
@@ -104,13 +149,13 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
             sensitivity_rows=[],
             daily_breakdown=[],
             tariff_effective_date=tariff_for_date(date.today()).effective_start,
+            rmp_sync_health=rmp_sync_health,
         )
 
     data_as_of = max(r.fetched_at for r in readings)
     window_start = readings[0].start_local
     window_end = readings[-1].start_local + timedelta(hours=1)
 
-    conn = open_recorder_db(db_path)
     ac_intervals = get_binary_sensor_intervals(conn, AC_ENTITY, window_start, window_end)
     ev_samples = {
         car: get_numeric_sensor_samples(conn, entity, window_start, window_end)
@@ -196,6 +241,7 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
         sensitivity_rows=sensitivity_rows,
         daily_breakdown=daily_breakdown,
         tariff_effective_date=tariff_for_date(date_range_end).effective_start,
+        rmp_sync_health=rmp_sync_health,
     )
 
 

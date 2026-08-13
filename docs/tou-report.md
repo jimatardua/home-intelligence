@@ -355,6 +355,15 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
       writeup in `docs/site-shared.md`. `<meta http-equiv="refresh">` and
       the Chart.js-via-CDN approach were explicitly left unchanged --
       out of scope for this change.
+- [x] RMP sync staleness banner (`RmpSyncHealth` in `render.py`,
+      `_get_rmp_sync_health()` in `generate_report.py`) -- reads the
+      `custom_components/rocky_mountain_power` integration's new
+      ok/stale/stuck entities and shows a fix-instructions banner when the
+      daily sync has gone stale/stuck, mirroring `cigar_dashboard`'s
+      collector-health banner. Server-rendered only, no client-side
+      redraw wiring -- this page's `<meta http-equiv="refresh">` reload
+      already covers it. See `docs/rmp-integration.md`'s "Staleness
+      alert" section.
 
 ## Phase 2 (deferred): AI narrative layer
 

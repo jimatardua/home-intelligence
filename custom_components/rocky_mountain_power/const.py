@@ -79,3 +79,18 @@ HOURLY_USAGE_UNIQUE_ID = f"{DOMAIN}_hourly_usage"
 HOURLY_USAGE_NAME = "Hourly Usage"
 
 ARCHIVE_DIR_NAME = "rocky_mountain_power_archive"
+
+# Staleness-alert entities -- see health.py for the ok/stale/stuck decision
+# logic and docs/rmp-integration.md's "Staleness alert" section for why
+# this exists (an 11-day silent outage with nothing visible anywhere).
+SYNC_PROBLEM_ENTITY_ID = "binary_sensor.rocky_mountain_power_sync_problem"
+SYNC_PROBLEM_UNIQUE_ID = f"{DOMAIN}_sync_problem"
+SYNC_PROBLEM_NAME = "Sync Problem"
+
+SYNC_STATUS_ENTITY_ID = "sensor.rocky_mountain_power_sync_status"
+SYNC_STATUS_UNIQUE_ID = f"{DOMAIN}_sync_status"
+SYNC_STATUS_NAME = "Sync Status"
+
+HOURS_SINCE_SYNC_ENTITY_ID = "sensor.rocky_mountain_power_hours_since_last_sync"
+HOURS_SINCE_SYNC_UNIQUE_ID = f"{DOMAIN}_hours_since_last_sync"
+HOURS_SINCE_SYNC_NAME = "Hours Since Last Sync"

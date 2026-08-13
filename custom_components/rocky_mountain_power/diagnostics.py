@@ -7,8 +7,10 @@ from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from .coordinator import RockyMountainPowerConfigEntry
+from .health import compute_sync_status
 
 TO_REDACT = {
     "site_idn",
@@ -42,6 +44,8 @@ async def async_get_config_entry_diagnostics(
                 else None
             ),
             "last_poll_duration_seconds": coordinator.last_poll_duration_seconds,
+            "sync_status": compute_sync_status(coordinator.last_successful_sync, dt_util.utcnow()),
+            "last_exception": str(coordinator.last_exception) if coordinator.last_exception else None,
             "latest_interval_date": (
                 coordinator.latest_interval_date.isoformat()
                 if coordinator.latest_interval_date

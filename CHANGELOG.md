@@ -6,6 +6,29 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.31] - 2026-08-13
+
+- Add a staleness alert for the Rocky Mountain Power custom integration,
+  mirroring the Govee collector health indicator (`ok`/`stale`/`stuck`
+  vocabulary, entities + a dashboard fix-instructions banner). Prompted by
+  checking in on RMP's status and finding the July session-poisoning
+  incident (11 days silently stale, see `docs/rmp-integration.md`) still
+  had nothing to alert on a repeat. New `custom_components/rocky_mountain_power/health.py`
+  computes status from `coordinator.last_successful_sync` (pure,
+  HA-independent, unit-tested the same way `api.py` already is); new
+  `binary_sensor.rocky_mountain_power_sync_problem` and two new `sensor.py`
+  entities (`sync_status`, `hours_since_last_sync`) surface it in HA.
+  `energy_report` (this integration's dashboard) shows a banner with the
+  exact, doc-confirmed fix ("Settings -> Devices & Services -> Rocky
+  Mountain Power -> Reload") whenever the sync goes stale/stuck --
+  server-rendered only, no client-side redraw needed since this page
+  already reloads hourly via `<meta refresh>`. Deployed and verified live:
+  all three entities report healthy, banner correctly hidden
+  (`display:none`) with an accurate baked-in message rather than a
+  leftover "unknown" placeholder text (caught live while spot-checking the
+  deploy, not left in). 12 tests in the RMP integration's own suite, 104
+  in `energy_report`'s.
+
 ## [1.0.30] - 2026-08-08
 
 - Add shared cross-page navigation, light/dark/auto theming, and PWA scope

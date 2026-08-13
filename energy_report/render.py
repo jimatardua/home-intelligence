@@ -40,6 +40,12 @@ _CHARTJS_DATE_ADAPTER_SCRIPT = (
     'crossorigin="anonymous"></script>'
 )
 
+# Baked in for the same reason cigar_dashboard/render.py's RESET_INSTRUCTIONS
+# is: one source of truth here rather than only in the docs, since this is
+# the moment someone actually needs it. The exact, doc-confirmed fix for the
+# real 11-day incident -- see docs/rmp-integration.md's "Real incident".
+RMP_RESET_INSTRUCTIONS = "Settings -> Devices & Services -> Rocky Mountain Power -> (menu) -> Reload"
+
 
 @dataclass(frozen=True)
 class DailyBreakdown:
@@ -61,6 +67,19 @@ class LeverRow:
     annual_impact_dollars: float | None
     pending: bool
     note: str
+
+
+@dataclass(frozen=True)
+class RmpSyncHealth:
+    """Mirrors cigar_dashboard/govee_history.py's CollectorHealth exactly --
+    same is_problem/status shape, applied to the RMP custom integration's
+    daily-sync entities instead of govee_collector's BLE watchdog. See
+    custom_components/rocky_mountain_power/health.py for the ok/stale/stuck
+    decision logic this reflects."""
+
+    is_problem: bool
+    status: str | None  # "ok" / "stale" / "stuck", or None if genuinely unknown
+    hours_since_last_sync: float | None
 
 
 @dataclass(frozen=True)
@@ -90,6 +109,9 @@ class ReportContext:
         "10% in the first 12 months of enrollment (credited back) -- a real "
         "safety net not reflected in the numbers above."
     )
+    rmp_sync_health: RmpSyncHealth = field(
+        default_factory=lambda: RmpSyncHealth(is_problem=False, status=None, hours_since_last_sync=None)
+    )
 
 
 def _fmt_money(v: float) -> str:
@@ -99,6 +121,28 @@ def _fmt_money(v: float) -> str:
 
 def _fmt_maybe_money(v: float | None) -> str:
     return _fmt_money(v) if v is not None else "N/A"
+
+
+def _rmp_health_message(health: RmpSyncHealth) -> str:
+    """Mirrors cigar_dashboard/render.py's _health_message() shape, for the
+    RMP integration's own daily-sync entities instead of the BLE watchdog.
+    Unlike that function, this one has an explicit "ok" case -- the banner
+    hides this text via display:none whenever it's not needed, but the
+    markup itself should still say something true, not just something
+    harmless, since it's easy to go looking at raw HTML while debugging
+    (as happened live while verifying this very feature)."""
+    if health.status == "stuck":
+        return (
+            "Rocky Mountain Power sync hasn't succeeded in over 2 days -- "
+            "automatic daily retries have failed. Manual reset needed:"
+        )
+    if health.status == "stale":
+        hours = health.hours_since_last_sync
+        age = f"{hours:.0f}h" if hours is not None else "a while"
+        return f"No successful RMP sync in {age} -- the integration is retrying automatically."
+    if health.status == "ok":
+        return "RMP sync is healthy."
+    return "RMP sync health unknown -- entity data missing or unavailable."
 
 
 def _maturity_label(tier: str) -> str:
@@ -192,6 +236,9 @@ def render_report(ctx: ReportContext) -> str:
     series = _chart_series(ctx.daily_breakdown)
     sensitivity_html = _sensitivity_table_html(ctx.sensitivity_rows)
 
+    health_banner_display = "flex" if ctx.rmp_sync_health.is_problem else "none"
+    health_banner_message = _rmp_health_message(ctx.rmp_sync_health)
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -214,6 +261,9 @@ header h1{{font-size:18px;font-weight:700}}
 header .meta{{font-size:12px;color:rgba(255,255,255,.55)}}
 .banner{{background:var(--card);border-radius:var(--r);padding:14px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:var(--gap);font-size:13px}}
 .banner .tier{{font-weight:700;color:var(--accent)}}
+.health-banner{{background:var(--card);border:1px solid var(--warn);border-radius:var(--r);padding:14px 20px;margin-bottom:var(--gap);display:flex;flex-direction:column;gap:8px}}
+.health-banner-message{{color:var(--warn);font-weight:700;font-size:14px}}
+.health-banner-fix{{background:var(--bg);border-radius:8px;padding:10px 12px;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--text);white-space:pre-wrap;overflow-x:auto}}
 .kpi-row{{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--gap);margin-bottom:var(--gap)}}
 .kpi{{background:var(--card);border-radius:var(--r);padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);border-top:4px solid var(--accent)}}
 .kpi.tou{{--accent:#7c3aed}}.kpi.diff{{--accent:#d97706}}
@@ -247,6 +297,11 @@ footer{{text-align:center;font-size:11px;color:var(--muted);padding:10px 0}}
   <h1>Rocky Mountain Power: Standard vs. Time-of-Use</h1>
   <span class="meta">Data as of {data_as_of_str} &nbsp;·&nbsp; <a href="." style="color:rgba(255,255,255,.6)">&#8635; refresh</a></span>
 </header>
+
+<div class="health-banner" style="display:{health_banner_display}">
+  <div class="health-banner-message">{health_banner_message}</div>
+  <pre class="health-banner-fix">{RMP_RESET_INSTRUCTIONS}</pre>
+</div>
 
 <div class="banner">
   <span class="tier">{_maturity_label(ctx.maturity_tier)}</span> &nbsp;·&nbsp;

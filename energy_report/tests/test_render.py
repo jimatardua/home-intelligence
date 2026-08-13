@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from energy_report.render import DailyBreakdown, ReportContext, _chart_series, render_report
+from energy_report.render import DailyBreakdown, ReportContext, RmpSyncHealth, _chart_series, render_report
 
 
 def _day(d: date, avg_outdoor_temp_f=None, avg_carport_temp_f=None) -> DailyBreakdown:
@@ -107,3 +107,47 @@ def test_render_report_chart_instances_are_named_for_theme_redraw():
     assert "const peakChart = new Chart(" in html
     assert "const tempChart = new Chart(" in html
     assert "document.addEventListener('themechange', applyChartTheme)" in html
+
+
+def test_render_report_hides_rmp_health_banner_when_healthy():
+    html = render_report(_minimal_ctx())
+
+    # The banner's message/fix text is always baked into the static markup
+    # (learned live-debugging cigar_dashboard's identical banner) -- the
+    # actual signal is the inline display style, not presence of the text.
+    assert 'class="health-banner" style="display:none"' in html
+
+
+def test_render_report_shows_rmp_health_banner_when_stuck():
+    ctx = _minimal_ctx(
+        rmp_sync_health=RmpSyncHealth(is_problem=True, status="stuck", hours_since_last_sync=60.0)
+    )
+    html = render_report(ctx)
+
+    assert 'class="health-banner" style="display:flex"' in html
+    assert "hasn't succeeded in over 2 days" in html
+    assert "Reload" in html
+
+
+def test_render_report_shows_rmp_health_banner_message_when_stale():
+    ctx = _minimal_ctx(
+        rmp_sync_health=RmpSyncHealth(is_problem=True, status="stale", hours_since_last_sync=32.0)
+    )
+    html = render_report(ctx)
+
+    assert 'class="health-banner" style="display:flex"' in html
+    assert "No successful RMP sync in 32h" in html
+
+
+def test_render_report_baked_in_message_is_accurate_when_ok_even_though_hidden():
+    # The banner's markup is always present, just display:none-d when
+    # healthy -- the baked-in text should still be true, not a leftover
+    # "unknown" placeholder, since it's easy to go looking at raw HTML
+    # while debugging (learned live while building this feature).
+    ctx = _minimal_ctx(
+        rmp_sync_health=RmpSyncHealth(is_problem=False, status="ok", hours_since_last_sync=0.1)
+    )
+    html = render_report(ctx)
+
+    assert 'class="health-banner" style="display:none"' in html
+    assert "RMP sync is healthy." in html

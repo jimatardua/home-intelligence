@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from .api import RockyMountainPowerClient
 from .coordinator import RockyMountainPowerConfigEntry, RockyMountainPowerCoordinator
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: RockyMountainPowerConfigEntry) -> bool:
