@@ -6,6 +6,20 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.32] - 2026-08-14
+
+- Add a preemptive nightly BLE adapter reset for the Govee cigar-storage
+  collector (`govee_collector/ble_nightly_reset.sh`, cron'd 4am
+  America/Denver on mrteeny). The BlueZ adapter wedged into a silent
+  `org.bluez.Error.InProgress` state a second time (2026-08-10 and again
+  2026-08-14), both times with no contending process, confirming this is
+  a recurring BlueZ quirk rather than a one-off. Runs the same
+  `hciconfig`/`bluetooth`/`govee-collector` restart sequence that fixed
+  it live both times, proactively, rather than waiting for the watchdog
+  to detect and exhaust retries. Smoke-tested live before relying on the
+  schedule: adapter reset cleanly, fresh advertisements confirmed
+  flowing within seconds.
+
 ## [1.0.31] - 2026-08-13
 
 - Add a staleness alert for the Rocky Mountain Power custom integration,

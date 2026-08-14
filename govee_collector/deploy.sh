@@ -54,7 +54,20 @@ sudo cp /opt/home-intelligence/govee_collector/systemd/govee-collector.service /
 sudo systemctl daemon-reload
 sudo systemctl enable --now govee-collector
 
---- 4. Verify ------------------------------------------------------------------
+--- 4. Nightly preemptive BLE adapter reset (one-time) ------------------------
+
+hci0 has wedged into a silent org.bluez.Error.InProgress state twice
+(2026-08-10, 2026-08-14) with no contending process either time -- see
+docs/govee-cigar-monitor.md's "Known risks" section. This runs the same
+manual reset sequence that fixed it both times, nightly, before the
+watchdog ever needs to notice:
+
+    chmod +x /opt/home-intelligence/govee_collector/ble_nightly_reset.sh
+    crontab -e
+    # add:
+    0 4 * * * /opt/home-intelligence/govee_collector/ble_nightly_reset.sh >> /opt/home-intelligence/govee_collector/ble_reset_cron.log 2>&1
+
+--- 5. Verify ------------------------------------------------------------------
 
 journalctl -u govee-collector -f
 mosquitto_sub -h domus.ardua.lan -u govee-collector -P '<password>' -t 'govee/#' -v

@@ -262,6 +262,33 @@ problem too, not silently hidden -- unlike a single sensor reading (where
 job is catching anomalies, so "we can't tell" should read as "go check,"
 not as "everything's fine."
 
+## Preemptive nightly BLE reset
+
+`hci0` wedged into a silent `org.bluez.Error.InProgress` state twice
+(2026-08-10 and 2026-08-14), both times with no contending process (no
+`table.py`/`scan.py` running, `bluetoothd` otherwise healthy) -- BlueZ
+itself appears to periodically get stuck on its own, independent of
+anything this project controls. The collector health indicator above
+correctly caught both, but a human still had to SSH in and run the fix
+each time.
+
+`govee_collector/ble_nightly_reset.sh` runs that same fix (`hciconfig hci0
+down`/`up`, `bluetooth` service restart, `govee-collector` restart)
+proactively every night at 4am America/Denver via cron on mrteeny, rather
+than waiting for the watchdog to detect and exhaust retries. This causes a
+brief (~10-20s) gap in cigar-storage monitoring at that hour -- an
+acceptable tradeoff against needing manual intervention every few days.
+Uses passwordless `sudo` already scoped to `hciconfig`/`systemctl` on
+mrteeny; the collector process itself was still deliberately not given
+`CAP_NET_ADMIN`/root (see "Known risks" below).
+
+Deployed via `govee_collector/deploy.sh`'s step 4 (cron entry is a
+one-time manual step, same reasoning as the systemd unit install --
+touches host-level standing state, not silently applied by the script).
+Smoke-tested live by running the script directly: adapter reset cleanly,
+`govee-collector` and `bluetooth` both came back `active`, fresh
+advertisements confirmed flowing within seconds.
+
 ## Known risks / things to watch
 
 - **The `govee-collector` MQTT login has full, unscoped broker access**,
@@ -287,15 +314,18 @@ not as "everything's fine."
   and renders correctly -- not just assumed to work.
 - **The watchdog can't recover from a genuinely stuck BlueZ adapter**
   (`org.bluez.Error.InProgress`) on its own -- that needed a manual
-  `hciconfig hci0 down`/`up` + `bluetooth` service restart once, live (see
-  "Real findings"). If this recurs and `Restart=always` ends up
-  crash-looping indefinitely instead of self-healing, that's the fix:
-  `sudo hciconfig hci0 down && sudo hciconfig hci0 up && sudo systemctl
-  restart bluetooth`, then `sudo systemctl restart govee-collector`.
-  Giving the collector enough privilege to do this itself (root, or
-  `CAP_NET_ADMIN`) was deliberately not done -- a real tradeoff against
-  this project's least-privilege habits, worth revisiting only if manual
-  recovery becomes a recurring, not one-off, annoyance.
+  `hciconfig hci0 down`/`up` + `bluetooth` service restart, live, on
+  2026-08-10 and again on 2026-08-14 (see "Real findings"), both times
+  with no contending process -- BlueZ itself appears to periodically wedge
+  independent of anything this project controls. That's now a recurring,
+  not one-off, annoyance, so `govee_collector/ble_nightly_reset.sh`
+  (deployed, cron'd nightly at 4am America/Denver -- see "Preemptive
+  nightly BLE reset" below) runs the same fix proactively rather than
+  waiting for the watchdog to detect and exhaust retries. Giving the
+  collector enough privilege to do this itself (root, or `CAP_NET_ADMIN`)
+  was still deliberately not done -- the nightly cron job (via passwordless
+  `sudo` scoped to `hciconfig`/`systemctl`) achieves the same outcome
+  without widening the collector process's own privileges.
 
 ## Status
 
@@ -337,6 +367,10 @@ not as "everything's fine."
       `docs/site-shared.md`. Explicitly did NOT gain a PWA manifest/icon
       link -- only `home_dashboard` is meant to be independently
       installable.
+- [x] Preemptive nightly BLE adapter reset (`ble_nightly_reset.sh`,
+      cron'd 4am America/Denver on mrteeny) -- added after the BlueZ
+      wedge recurred a second time (2026-08-10, 2026-08-14). See
+      "Preemptive nightly BLE reset" above.
 - [ ] Visually reviewed in an actual browser at
       `https://domus.ardua.com/cigars/` (built and verified via `curl`
       and direct file inspection so far, not yet eyeballed live)
