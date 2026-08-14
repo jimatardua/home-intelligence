@@ -73,6 +73,46 @@
   `..._irina_s_tesla_wifi` (the old `ping` sensors) are superseded by
   `..._arp` sensors of the same shape; the old `ping` integration entries
   can be removed from Settings > Devices & Services once confirmed stable.
+- **A Docker daemon restart on domus (not a full host reboot) can leave HA
+  Supervised down for a long time with no self-healing.** Found live
+  (2026-08-14): an infrastructure-side patch run restarted Docker on domus
+  without rebooting the host (deliberately, per that project's own notes,
+  due to domus's known-fragile boot history). Every Supervisor-managed
+  container has `RestartPolicy: no` by design — confirmed across all of
+  them (`homeassistant`, `hassio_supervisor`, `hassio_cli`, `hassio_audio`,
+  `hassio_dns`, `hassio_multicast`, `app_core_mosquitto`) — because
+  Supervisor manages container lifecycle itself via its own watchdog
+  rather than delegating to Docker, so it retains full control during
+  updates/backups/safe-mode transitions. Most containers reattached to the
+  restarted daemon within seconds on their own, but `homeassistant` and
+  `app_core_mosquitto` (the MQTT broker add-on) did not — both sat fully
+  stopped (clean exit code 0, not crashed) for ~47 minutes until noticed
+  and restarted by hand. Supervisor's watchdog appears built to catch the
+  app *inside* a running container crashing, not a container being
+  stopped by something outside its own orchestration (like an external
+  `systemctl restart docker`).
+  **The correct fix is Supervisor's own commands, not raw Docker**: `ha
+  core restart` for core; add-ons need `ha apps restart <slug>` (e.g.
+  `core_mosquitto`), not `docker start` — demonstrated live: `docker start
+  app_core_mosquitto` left the container running but with broken internal
+  DNS registration (HA logged `Failed to connect to MQTT server due to
+  exception: [Errno -5] Name has no usable address`), only resolved by
+  restarting it through Supervisor's own orchestration instead.
+  Downstream effects while this was undiagnosed: `home_dashboard`/
+  `cigar_dashboard`'s cron jobs crash-looped on
+  `sqlite3.OperationalError: attempt to write a readonly database` (HA's
+  clean shutdown tore down the recorder DB's WAL sidecar files, which our
+  unprivileged read-only connections can't recreate until HA's own writer
+  reopens them), freezing both dashboards on stale data — including the
+  home dashboard showing a "button up the house" banner that was accurate
+  when generated but 47 minutes stale by the time it was actually seen.
+  Not thought to be a frequent failure mode (this was the first
+  occurrence) — no watchdog built for it; if it recurs, worth adding a
+  periodic check that Supervisor-managed containers are actually running
+  and re-issuing the Supervisor-native restart command when they aren't.
+  Backlogged in `~/Developer/infrastructure`'s `TASKS.md` ("Someday")
+  rather than here, since it's an infrastructure/watchdog concern, not
+  application code in this repo.
 
 ## Cigar Storage Monitoring
 

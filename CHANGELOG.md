@@ -6,6 +6,21 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.33] - 2026-08-14
+
+- Document a real incident in `hardware.md`'s domus section: a Docker
+  daemon restart (from an infrastructure-side patch run, deliberately not
+  a full host reboot) left `homeassistant` and `app_core_mosquitto`
+  stopped for ~47 minutes with no self-healing, since every
+  Supervisor-managed container runs with `RestartPolicy: no` by design.
+  Traced live, fixed with `ha core restart` / `ha apps restart
+  core_mosquitto` (a raw `docker start` left mosquitto with broken
+  internal DNS registration). No code changes -- the fleet-wide watchdog
+  question is backlogged in `~/Developer/infrastructure`'s `TASKS.md`
+  rather than built now, since this was a first occurrence. Also corrected
+  a stale note in that project's active patch-management plan, which had
+  misattributed the same event to unfinished HA onboarding.
+
 ## [1.0.32] - 2026-08-14
 
 - Add a preemptive nightly BLE adapter reset for the Govee cigar-storage
