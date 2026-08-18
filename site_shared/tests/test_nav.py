@@ -26,31 +26,30 @@ def test_render_nav_html_raises_on_unknown_page():
         render_nav_html("bogus-page")
 
 
-def test_render_nav_html_show_toggle_true_includes_toggle_and_script():
-    html = render_nav_html("energy-report", show_toggle=True)
-
-    assert 'id="theme-toggle"' in html
-    assert "data-theme-choice=\"light\"" in html
-    assert "data-theme-choice=\"dark\"" in html
-    assert "data-theme-choice=\"auto\"" in html
-    assert "themechange" in html
-    assert "matchMedia" in html  # composed-in watch script for OS-change-while-auto
+def test_render_nav_html_never_includes_a_toggle():
+    # No page has a manual theme override anymore -- the site always
+    # follows the OS. Checked across all three pages, not just one.
+    for active_page in PAGES:
+        html = render_nav_html(active_page)
+        assert "theme-toggle" not in html
+        assert "data-theme-choice" not in html
 
 
-def test_render_nav_html_show_toggle_false_omits_toggle_entirely():
-    html = render_nav_html("dashboard", show_toggle=False)
+def test_render_nav_html_always_includes_the_watch_script():
+    # Every page needs the "OS scheme changed while open" redraw case,
+    # not just pages that used to have a toggle.
+    for active_page in PAGES:
+        html = render_nav_html(active_page)
+        assert "themechange" in html
+        assert "matchMedia" in html
 
-    assert "theme-toggle" not in html
-    assert "<script>" not in html
-    assert "data-theme-choice" not in html
 
-
-def test_render_nav_html_show_toggle_false_still_links_all_pages():
-    html = render_nav_html("dashboard", show_toggle=False)
-
-    for path, label in PAGES.values():
-        assert f'href="{path}"' in html
-        assert label in html
+def test_render_nav_html_links_all_pages_for_every_active_page():
+    for active_page in PAGES:
+        html = render_nav_html(active_page)
+        for path, label in PAGES.values():
+            assert f'href="{path}"' in html
+            assert label in html
 
 
 def test_neighbor_hrefs_first_page_has_no_prev():
@@ -102,3 +101,14 @@ def test_render_swipe_nav_script_last_page_next_is_null():
 def test_render_swipe_nav_script_raises_on_unknown_page():
     with pytest.raises(ValueError):
         render_swipe_nav_script("bogus-page")
+
+
+def test_render_swipe_nav_script_hides_nav_on_touch_devices():
+    # Checked across all three pages -- every page gets both the swipe
+    # capability and the redundant-nav-hiding it enables, not just one.
+    for active_page in PAGES:
+        html = render_swipe_nav_script(active_page)
+        assert "ontouchstart" in html
+        assert "maxTouchPoints" in html
+        assert "site-nav" in html
+        assert "display = 'none'" in html

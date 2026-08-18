@@ -365,9 +365,13 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
       already covers it. See `docs/rmp-integration.md`'s "Staleness
       alert" section.
 - [x] Swipe-to-navigate between the three pages (`nav.render_swipe_nav_script`
-      in `site_shared`). Full writeup in `docs/site-shared.md`. Not yet
-      verified on a physical device/simulator -- see that doc's "Swipe
-      navigation" section.
+      in `site_shared`). Full writeup in `docs/site-shared.md`. Confirmed
+      live on a real iPad, both directions.
+- [x] Manual light/dark/auto toggle removed entirely, from every page --
+      the site always follows the OS now. Nav links are also now hidden
+      on any touch-capable device (swipe replaces them there) -- confirmed
+      via a real iPad simulator that `.site-nav` is fully hidden on this
+      page. Full writeup in `docs/site-shared.md`.
 
 ## Phase 2 (deferred): AI narrative layer
 

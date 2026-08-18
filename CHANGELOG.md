@@ -6,6 +6,35 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.35] - 2026-08-18
+
+- Remove the light/dark/auto theme toggle entirely (from every page, not
+  just defaulted off) -- the site always follows the OS setting now, no
+  manual override anywhere. `nav.render_nav_html()` no longer takes a
+  `show_toggle` parameter; the toggle's HTML/CSS/click-handling script
+  was deleted outright rather than left dead, since no caller would ever
+  request it again. `theme.render_theme_bootstrap_script()`'s job changed
+  to match: it now actively clears any leftover manual-override value
+  from before this change instead of applying it, so nobody who'd
+  clicked "Dark"/"Light" earlier stays stuck with no UI left to undo it.
+- Hide the nav's link row entirely on touch-capable devices, extending
+  `nav.render_swipe_nav_script()` -- prompted by testing swipe-to-navigate
+  live and noticing the three pages' nav bars looked inconsistent (the
+  kiosk's small corner links vs. the other two's full top bar). Once
+  swipe works, the links are redundant on any touch device; hiding them
+  (rather than reskinning them small everywhere) resolves the
+  inconsistency as a side effect -- nothing shows on any of the three
+  pages on an iPad/iPhone. Non-touch visitors (e.g. a laptop browser)
+  keep the visible links, since swipe isn't available to them as a
+  substitute.
+- Fixed this Mac's Xcode setup along the way (`xcode-select` was pointed
+  at the command-line-tools path even after a full Xcode install) and
+  used the now-working iOS Simulator to actually confirm all of this live
+  for the first time this project has been able to: booted an iPad Air
+  simulator, loaded all three deployed pages, and confirmed by screenshot
+  that the nav is fully hidden on all three and that a real swipe gesture
+  navigates correctly in both directions.
+
 ## [1.0.34] - 2026-08-15
 
 - Add swipe-to-navigate between the three dashboards (`nav.render_swipe_nav_script`

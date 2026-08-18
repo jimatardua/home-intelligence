@@ -501,10 +501,11 @@ const tempChart = new Chart(document.getElementById('tempChart'), {{
   options: tempOpts
 }});
 
-// Re-applied on every 'themechange' (nav.py's toggle click, or the OS
-// scheme changing while in auto mode, per site_shared.theme's watch
-// script) -- Chart.js draws to canvas, so it never picks up new CSS
-// custom property values on its own the way the rest of the page's
+// Re-applied on every 'themechange' (the OS scheme changing while the page
+// is open, per site_shared.theme's watch script -- the only way this
+// event ever fires now, since there's no toggle anymore) -- Chart.js
+// draws to canvas, so it never picks up new CSS custom property values
+// on its own the way the rest of the page's
 // pure-CSS chrome does.
 function applyChartTheme() {{
   themeColors = chartThemeColors();

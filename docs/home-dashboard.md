@@ -528,6 +528,13 @@ current, so it goes blank instead.
 - [x] Swipe-to-navigate between the three pages (`nav.render_swipe_nav_script`
       in `site_shared`) -- included on this page despite the no-toggle
       kiosk decision above, since a swipe gesture doesn't cost an
-      on-screen tap target. Full writeup in `docs/site-shared.md`. Not yet
-      verified on a physical device/simulator -- see that doc's "Swipe
-      navigation" section.
+      on-screen tap target. Full writeup in `docs/site-shared.md`.
+      Confirmed live on a real iPad, both directions.
+- [x] Manual light/dark/auto toggle removed entirely, from every page --
+      the site always follows the OS now, no override anywhere. Nav links
+      themselves are also now hidden on any touch-capable device (swipe
+      replaces them there) -- confirmed via a real iPad simulator that
+      `.site-nav` is fully hidden on this page too, closing the original
+      look-and-feel inconsistency between this page's compact corner nav
+      and the other two pages' full top bar (all three now show nothing
+      on an iPad). Full writeup in `docs/site-shared.md`.

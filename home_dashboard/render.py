@@ -289,8 +289,9 @@ def render_html(ctx: DashboardContext) -> str:
    not a top-of-page bar like the other two pages -- this page's whole
    layout is hand-tuned vh/vw math filling exactly 100vh with
    overflow:hidden (no scroll), so nothing can compete for flex space.
-   No toggle is rendered at all (show_toggle=False, see render_html) --
-   just enough to fit page-switch links without any layout risk. */
+   On the actual kiosk hardware (always touch) this is normally hidden
+   entirely by nav.render_swipe_nav_script()'s touch check -- kept as the
+   non-touch fallback (e.g. loading this URL from a laptop browser). */
 .site-nav{{position:fixed;top:max(1vh,env(safe-area-inset-top));left:max(2vw,env(safe-area-inset-left));background:transparent;padding:0;margin:0;z-index:10}}
 .site-nav .links{{gap:2px}}
 .site-nav a{{font-size:min(1.6vw,12px);padding:2px 8px;background:var(--card);opacity:.8}}
@@ -343,8 +344,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 <body>
 
 {load_icon_sprite()}
-{nav.render_nav_html("dashboard", show_toggle=False)}
-{theme.render_theme_watch_script()}
+{nav.render_nav_html("dashboard")}
 {nav.render_swipe_nav_script("dashboard")}
 
 <div class="hero">
@@ -535,8 +535,8 @@ async function refreshData() {{
 }}
 setInterval(refreshData, REFRESH_MS);
 
-// No manual toggle on this page (unattended kiosk, see docs/home-dashboard.md),
-// but the OS scheme can still change while the display stays open for days
+// No manual toggle exists anywhere (the site always follows the OS), but
+// the scheme can still change while this display stays open for days
 // (e.g. an iOS system dark-mode schedule) -- site_shared.theme's watch
 // script (included above) dispatches 'themechange' for that case, and the
 // sparkline's gridline/label colors (baked into SVG markup, not pure CSS)

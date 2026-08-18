@@ -372,12 +372,19 @@ advertisements confirmed flowing within seconds.
       wedge recurred a second time (2026-08-10, 2026-08-14). See
       "Preemptive nightly BLE reset" above.
 - [x] Swipe-to-navigate between the three pages (`nav.render_swipe_nav_script`
-      in `site_shared`). Full writeup in `docs/site-shared.md`. Not yet
-      verified on a physical device/simulator -- see that doc's "Swipe
-      navigation" section.
-- [ ] Visually reviewed in an actual browser at
-      `https://domus.ardua.com/cigars/` (built and verified via `curl`
-      and direct file inspection so far, not yet eyeballed live)
+      in `site_shared`). Full writeup in `docs/site-shared.md`. Confirmed
+      live on a real iPad, both directions.
+- [x] Manual light/dark/auto toggle removed entirely, from every page --
+      the site always follows the OS now. Nav links are also now hidden
+      on any touch-capable device (swipe replaces them there) -- confirmed
+      via a real iPad simulator that `.site-nav` is fully hidden on this
+      page. Full writeup in `docs/site-shared.md`.
+- [x] Visually reviewed in an actual browser at
+      `https://domus.ardua.com/cigars/` -- booted an iPad Air simulator
+      and confirmed by screenshot (nav hidden, swipe working, page
+      rendering correctly). The card layout/chart rendering itself was
+      last eyeballed this way; the toggle's own visual states are moot
+      now that it doesn't exist.
 - [ ] The health banner's "problem" visual state hasn't been observed live
       (only unit-tested + confirmed via the underlying data pipeline) --
       the original stuck-adapter incident that motivated this happened

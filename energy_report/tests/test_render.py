@@ -84,11 +84,12 @@ def test_render_report_includes_swipe_nav_with_no_next_page():
     assert "nextHref = null" in html
 
 
-def test_render_report_includes_theme_toggle():
+def test_render_report_excludes_theme_toggle():
+    # No manual override anywhere -- the site always follows the OS.
     html = render_report(_minimal_ctx())
 
-    assert 'id="theme-toggle"' in html
-    assert 'data-theme-choice="auto"' in html
+    assert 'id="theme-toggle"' not in html
+    assert "data-theme-choice" not in html
 
 
 def test_render_report_includes_shared_theme_css():

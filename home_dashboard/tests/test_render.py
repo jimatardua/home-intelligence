@@ -160,26 +160,17 @@ def test_render_html_indoor_temp_gets_warn_class_toggle_in_script():
 
 
 def test_render_html_includes_shared_nav_links_no_toggle():
-    # Kiosk decision: page-switch links yes, interactive toggle no -- see
-    # docs/home-dashboard.md.
+    # No manual theme override anywhere -- the site always follows the OS.
     html = render_html(_minimal_context())
 
     assert 'href="/dashboard/" class="active"' in html
     assert 'href="/cigars/"' in html
     assert 'href="/energy-report/"' in html
-    # No toggle *element* or click-handling script -- nav.NAV_STYLE's
-    # .theme-toggle CSS rule is still present (shared, harmless dead CSS
-    # when unused), so this checks the actual element/behavior, not the
-    # class name as a bare substring.
     assert 'id="theme-toggle"' not in html
     assert "data-theme-choice" not in html
 
 
-def test_render_html_includes_swipe_nav_despite_no_toggle():
-    # Kiosk decision: swipe nav is included even though the interactive
-    # toggle isn't -- a swipe gesture isn't an extra on-screen tap target
-    # competing for space in the hand-tuned kiosk layout the way the
-    # toggle would be.
+def test_render_html_includes_swipe_nav():
     html = render_html(_minimal_context())
 
     assert "prevHref = null" in html

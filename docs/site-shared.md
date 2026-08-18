@@ -48,58 +48,70 @@ site_shared/
 ### Theming
 
 One shared palette (`site_shared/theme.py`): light default, dark applied
-via `@media (prefers-color-scheme: dark)`, plus a manual `:root[data-theme="dark"]`/`[data-theme="light"]`
-override for the toggle -- no `data-theme` attribute set at all means
-"auto." Dark reuses `home_dashboard`/`cigar_dashboard`'s already-tuned
-values unchanged; light is a fresh design (loosely referencing
-`energy_report`'s old palette, but its accent `#2563eb` is reconciled to
-the shared `#4da3ff`, since 2 of 3 pages already used that blue -- one
-brand accent across the whole site now, not three competing blues).
-`warn` gets a real light/dark pair (`#dc2626`/`#ef4444`), unlike
-per-series identity colors (Govee device colors, energy chart dataset
-colors), which stay fixed across themes on purpose -- brand/series colors
-staying constant while only neutrals swap is normal, defensible practice.
+via `@media (prefers-color-scheme: dark)`. Every page always follows the
+OS setting -- there is no manual override anywhere (see "Auto-only
+theming" below for why that changed from the original toggle design); the
+CSS still carries a `:root[data-theme="dark"]`/`[data-theme="light"]`
+manual-override rule for completeness, but nothing sets that attribute
+anymore, so it's currently unreachable. Dark reuses `home_dashboard`/
+`cigar_dashboard`'s already-tuned values unchanged; light is a fresh
+design (loosely referencing `energy_report`'s old palette, but its accent
+`#2563eb` is reconciled to the shared `#4da3ff`, since 2 of 3 pages
+already used that blue -- one brand accent across the whole site now, not
+three competing blues). `warn` gets a real light/dark pair
+(`#dc2626`/`#ef4444`), unlike per-series identity colors (Govee device
+colors, energy chart dataset colors), which stay fixed across themes on
+purpose -- brand/series colors staying constant while only neutrals swap
+is normal, defensible practice.
 
-**FOUC avoidance**: `theme.render_theme_bootstrap_script()` is a tiny,
-synchronous `<script>` inlined early in `<head>` (before the `<style>`
-block) that reads `localStorage` and sets `data-theme` on `<html>` before
-first paint -- every other script block in these pages runs at the end of
-`<body>`, but this one specifically can't, or the page would flash its
-default theme before the saved override applies. Included on `home_dashboard`
-too, even though it has no toggle UI of its own to ever write that key --
-`localStorage` is shared across all three pages on this origin, so a
-choice made on `/cigars/` or `/energy-report/` should still be honored
-consistently if that same browser ever loads `/dashboard/`.
+### Auto-only theming (no manual toggle)
+
+The original design had a light/dark/auto toggle on `cigar_dashboard`/
+`energy_report` (the kiosk was excluded from the start -- see "Swipe
+navigation" for how that reasoning has since shifted). After using it
+live, the preference turned out to be simpler: always follow the OS,
+everywhere, no manual override at all. `nav.render_nav_html()` no longer
+takes a `show_toggle` parameter -- the toggle HTML/CSS/click-handling
+script was deleted outright rather than defaulted off, since no caller
+would ever request it again.
+
+`theme.render_theme_bootstrap_script()`'s job changed with it: it used to
+read `localStorage` and apply a saved override before first paint (FOUC
+avoidance for the toggle). With no toggle left to ever write that key
+again, it now actively clears any leftover value instead -- otherwise
+anyone who'd clicked "Dark"/"Light" before this change would stay stuck
+in that manual override forever, with no UI left to undo it. Still
+inlined early in `<head>` on every page, same insertion point as before.
 
 **Chart/canvas redraw**: CSS custom properties don't reach into `<canvas>`
 (Chart.js, in `energy_report`) or baked SVG attribute strings (the
 hand-rolled sparkline/multi-series charts in the other two) -- those need
-an explicit redraw on theme change, not just new CSS. `nav.py`'s toggle
-dispatches a `themechange` DOM event on click; `theme.render_theme_watch_script()`
-dispatches the same event when the OS scheme changes while in `auto` mode
-(needed for pages that stay open indefinitely -- `home_dashboard`'s kiosk
-in particular, since iOS's system dark mode can auto-switch on a schedule
-while the display never reloads). Each page's own script listens for
-`themechange` and re-invokes its own draw call from cached last-applied
-data (no refetch needed, since the underlying data hasn't changed, only
-which colors it should be drawn with) -- `energy_report`'s three
-`Chart.js` instances are named (`disaggChart`/`peakChart`/`tempChart`,
-previously anonymous) so `.update()` is callable from the listener.
+an explicit redraw on theme change, not just new CSS.
+`theme.render_theme_watch_script()` dispatches a `themechange` DOM event
+whenever the OS scheme changes while a page is open -- now the *only* way
+that event ever fires, since there's no toggle click to dispatch it
+anymore -- and `nav.render_nav_html()` includes it unconditionally on
+every page (previously bundled inside the toggle's own markup, which
+meant the kiosk had to include it via a second, separate call; that's
+gone now that there's only one code path). Needed for pages that stay
+open indefinitely -- `home_dashboard`'s kiosk in particular, since iOS's
+system dark mode can auto-switch on a schedule while the display never
+reloads. Each page's own script listens for `themechange` and
+re-invokes its own draw call from cached last-applied data (no refetch
+needed, since the underlying data hasn't changed, only which colors it
+should be drawn with) -- `energy_report`'s three `Chart.js` instances are
+named (`disaggChart`/`peakChart`/`tempChart`, previously anonymous) so
+`.update()` is callable from the listener.
 
 ### Navigation
 
-`nav.render_nav_html(active_page, show_toggle=True)` renders the 3 page
-links (current page highlighted) plus, when `show_toggle`, the light/dark/auto
-control. **Kiosk decision** (confirmed with the user): `home_dashboard`
-calls this with `show_toggle=False` -- it's an unattended wall-mounted
-iPad, and a tap target there is unnecessary risk to a carefully vh/vw-tuned
-single-viewport layout (`overflow:hidden`, no scroll) for a control nobody
-will use unattended. It still gets page-switch links, positioned as a
-small `position:fixed` corner element (a page-local CSS override of the
-shared `.site-nav` class, same pattern as the existing `.battery-corner`)
-so it doesn't compete for space in that page's flex-column vh budget at
-all -- the other two pages use the shared component's default top-bar
-layout unmodified.
+`nav.render_nav_html(active_page)` renders the 3 page links (current page
+highlighted). No manual light/dark/auto control exists anywhere -- see
+"Theming," below -- so every page uses the shared component's default
+top-bar layout unmodified, including the kiosk (`home_dashboard`), which
+originally had its own small-corner CSS override for a now-removed
+toggle-avoidance reason. That override still exists (see "Swipe
+navigation" below for why) but the *reason* for it changed.
 
 ### Swipe navigation
 
@@ -120,21 +132,34 @@ whatever `prevHref`/`nextHref` string literals (or `null` at either end)
 Python computed. No wraparound: swiping past the last page does nothing
 rather than surprise-landing back at the first.
 
-**Included on the kiosk** (`home_dashboard`), unlike the toggle -- a swipe
-gesture isn't an extra on-screen tap target competing for space in the
-hand-tuned kiosk layout the way the toggle would have been, so the same
-"unattended device, minimize interactive surface" reasoning that excluded
-the toggle didn't apply here.
+**Confirmed working on a real iPad.** Prompted by that live test, the
+same script also hides `.site-nav` entirely on any touch-capable device
+(`'ontouchstart' in window || navigator.maxTouchPoints > 0`) -- once
+swipe works, the link row is redundant there, and hiding it (rather than
+reskinning it small, which is what the kiosk's own corner-CSS override
+originally did for a different reason -- fitting inside its hand-tuned
+100vh layout) is what actually makes all three pages' look consistent on
+an iPad/iPhone: nothing shows on any of them. Non-touch visitors (e.g. a
+laptop browser loading these URLs directly) keep the visible links, since
+swipe isn't available to them as a substitute -- `cigar_dashboard`/
+`energy_report` are still meant to be normally browsable, not touch-only.
+The kiosk's small-corner nav styling still exists as that same non-touch
+fallback, even though the actual kiosk hardware (always touch) now hides
+it outright rather than ever showing it small.
 
 Threshold (`_SWIPE_MIN_PX = 60`, off-axis ratio `0.5`) is a starting
-point, not a measured value -- **not verified on a physical device or
-simulator**: this Mac's Xcode install isn't complete enough for the
-native iOS Simulator tool to attach, so gesture feel/threshold tuning
-still needs a real swipe on the actual iPad/iPhone. Everything checkable
-without a touchscreen was checked: unit tests for the neighbor
-computation and script content, `node --check` on every extracted
-`<script>` block across all three pages, and live `curl` confirmation of
-the correct `prevHref`/`nextHref` values on each deployed page.
+point, not a measured value, but the gesture itself -- and the touch-hide
+behavior -- are both confirmed working end-to-end on a real touch device,
+not just inferred from static checks: booted an iPad Air simulator
+(`xcrun simctl boot`, after fixing `xcode-select` to point at the
+newly-installed Xcode.app rather than the command-line-tools path) and
+confirmed by screenshot on all three live pages that `.site-nav` is fully
+hidden, plus a real swipe gesture (`iPad Air 11-inch (M3)`, 820x1180pt
+coordinate space) navigating correctly in both directions
+(Cigars -> Energy on a left swipe, Energy -> Cigars on a right swipe).
+Unit tests for the neighbor computation and script content, `node --check`
+on every script block, and live `curl` confirmation of the correct
+`prevHref`/`nextHref` values round out the coverage.
 
 ### PWA scope fix (not new infrastructure)
 
@@ -171,17 +196,23 @@ already proven working on the two lower-stakes pages by that point).
   Screen" icon fidelity, etc. in `docs/home-dashboard.md`). Worth testing
   by tapping the nav links from within the already-installed kiosk PWA the
   next time someone's physically at it.
-- **The visual result hasn't been eyeballed in an actual browser** --
-  verified via direct HTML/CSS/JS inspection (`curl`, `node --check` on
-  every extracted inline `<script>` block) and the full pytest suite
-  across all four packages (201 tests), not a screenshot -- the available
-  browser-preview tool returned a per-action-approval error this session
-  that couldn't be resolved from here. Worth a quick look in a real
-  browser, especially the toggle's actual visual states and the
-  kiosk's fixed-corner nav placement relative to the hero row.
-- **`home_dashboard`'s `.site-nav` corner placement was reasoned about,
-  not measured on the physical iPad** -- `top:max(1vh,env(safe-area-inset-top))`
-  should sit within the existing `padding:max(4vh,...)` margin above the
-  hero row without overlapping it, but this page's layout has historically
-  needed real-device iteration (see the PWA/Wake-Lock section of
-  `docs/home-dashboard.md`) more than once.
+- **The visual result has now been confirmed on a real touch device.**
+  Earlier in this project, the visual result had only been checked via
+  `curl`/`node --check`, not a screenshot -- the available browser-preview
+  tool returned a per-action-approval error that couldn't be resolved.
+  That gap is closed for the nav-hide/swipe behavior specifically: booted
+  an iPad Air simulator (Xcode wasn't fully installed earlier in this
+  project; it is now), loaded all three live pages, and confirmed by
+  screenshot that `.site-nav` is fully hidden on all three (including the
+  kiosk) and that a real swipe gesture navigates correctly in both
+  directions. The kiosk's fixed-corner nav placement relative to the hero
+  row specifically was not re-checked, since it's now hidden outright on
+  any touch device rather than shown small -- see the next point.
+- **`home_dashboard`'s `.site-nav` corner placement is now a non-touch
+  fallback only, not something the actual kiosk hardware ever shows** --
+  on the real wall-mounted iPad (always touch), the nav is hidden
+  entirely by the touch check, so `top:max(1vh,env(safe-area-inset-top))`
+  potentially overlapping the hero row only matters for the rare case of
+  loading this URL from a non-touch browser, not the kiosk itself. Not
+  re-verified against the physical iPad specifically, but lower stakes
+  than when it mattered on every kiosk load.

@@ -219,13 +219,14 @@ def test_render_html_includes_swipe_nav_to_both_neighbors():
     assert 'nextHref = "/energy-report/"' in html
 
 
-def test_render_html_includes_theme_toggle():
+def test_render_html_excludes_theme_toggle():
+    # No manual override anywhere -- the site always follows the OS.
     ctx = _minimal_context()
 
     html = render_html(ctx)
 
-    assert 'id="theme-toggle"' in html
-    assert 'data-theme-choice="auto"' in html
+    assert 'id="theme-toggle"' not in html
+    assert "data-theme-choice" not in html
 
 
 def test_render_html_includes_shared_theme_css():

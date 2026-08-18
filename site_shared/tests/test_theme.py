@@ -52,13 +52,15 @@ def test_warn_color_has_a_distinct_pair_per_theme():
     assert LIGHT.warn != DARK.warn
 
 
-def test_bootstrap_script_reads_localstorage_before_first_paint():
+def test_bootstrap_script_clears_any_leftover_manual_override():
+    # No toggle exists anywhere anymore -- this actively clears any value
+    # left over from before that change, rather than applying it, so
+    # nobody stays stuck in a manual override with no UI left to undo it.
     script = render_theme_bootstrap_script()
 
     assert script.startswith("<script>")
     assert script.endswith("</script>")
-    assert "localStorage.getItem('theme')" in script
-    assert "setAttribute('data-theme'" in script
+    assert "localStorage.removeItem('theme')" in script
 
 
 def test_watch_script_only_redispatches_in_auto_mode():
