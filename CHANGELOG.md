@@ -6,6 +6,18 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.40] - 2026-08-18
+
+- Add a Family Room speaker card to the control panel: "Relaxing Music"
+  and "Stop" buttons for the Family Room Echo, via the newly-installed
+  `alexa_media_player` HACS integration. Uses `media_player.play_media`
+  with `media_content_type: custom` -- Amazon's own text-command
+  passthrough, confirmed live and from source -- which bypasses Alexa's
+  speech recognition entirely, sending the phrase directly instead of
+  relying on the device to hear and understand it correctly. Refactored
+  the blind-button click handler into a shared `wireActionButtons()`
+  helper, reused by the new speaker buttons instead of duplicating it.
+
 ## [1.0.39] - 2026-08-18
 
 - Add `Cache-Control: no-store` to both `/control/` nginx locations,

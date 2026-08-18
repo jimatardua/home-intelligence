@@ -16,7 +16,13 @@ import pytest
 os.environ.setdefault("HA_TOKEN", "test-token")
 
 from control_panel import ha_client, server  # noqa: E402
-from control_panel.const import CLIMATE_ENTITY, DINING_COVERS, OFFICE_COVERS  # noqa: E402
+from control_panel.const import (  # noqa: E402
+    ALEXA_ENTITY,
+    CLIMATE_ENTITY,
+    DINING_COVERS,
+    OFFICE_COVERS,
+    RELAXING_MUSIC_COMMAND,
+)
 
 
 @pytest.fixture
@@ -197,6 +203,60 @@ def test_set_blinds_rejects_invalid_position(client):
 def test_set_blinds_ha_error_returns_502(client):
     with patch.object(ha_client, "call_service", side_effect=ha_client.HomeAssistantError("hub timeout")):
         resp = client.post("/control/api/blinds/office", json={"position": 100})
+
+    assert resp.status_code == 502
+    assert resp.get_json()["error"] == "ha_error"
+
+
+# --- POST /control/api/speaker/<action> ------------------------------------
+
+
+def test_speaker_play_relaxing_sends_custom_text_command(client):
+    # Confirmed live: media_content_type "custom" is Alexa Media Player's
+    # text-command passthrough -- it bypasses speech recognition entirely
+    # by typing the phrase to the device instead of speaking it, which is
+    # the whole reason this button exists. See const.py.
+    with patch.object(ha_client, "call_service") as mock_call:
+        resp = client.post("/control/api/speaker/play_relaxing")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"ok": True}
+    mock_call.assert_called_once_with(
+        "media_player",
+        "play_media",
+        ALEXA_ENTITY,
+        media_content_type="custom",
+        media_content_id=RELAXING_MUSIC_COMMAND,
+    )
+
+
+def test_speaker_stop_calls_media_stop(client):
+    with patch.object(ha_client, "call_service") as mock_call:
+        resp = client.post("/control/api/speaker/stop")
+
+    assert resp.status_code == 200
+    mock_call.assert_called_once_with("media_player", "media_stop", ALEXA_ENTITY)
+
+
+def test_speaker_rejects_unknown_action(client):
+    with patch.object(ha_client, "call_service") as mock_call:
+        resp = client.post("/control/api/speaker/pause")
+
+    assert resp.status_code == 400
+    mock_call.assert_not_called()
+
+
+def test_speaker_unreachable_returns_503(client):
+    with patch.object(ha_client, "call_service", side_effect=ha_client.HomeAssistantUnreachable("no route")):
+        resp = client.post("/control/api/speaker/play_relaxing")
+
+    assert resp.status_code == 503
+    assert resp.get_json()["error"] == "unreachable"
+
+
+def test_speaker_ha_error_returns_502(client):
+    with patch.object(ha_client, "call_service", side_effect=ha_client.HomeAssistantError("device offline")):
+        resp = client.post("/control/api/speaker/stop")
 
     assert resp.status_code == 502
     assert resp.get_json()["error"] == "ha_error"

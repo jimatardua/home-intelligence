@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from control_panel.const import HVAC_MODES, OFFICE_COVERS, DINING_COVERS, ROOM_LABELS
+from control_panel.const import (
+    ALEXA_ENTITY,
+    DINING_COVERS,
+    HVAC_MODES,
+    OFFICE_COVERS,
+    ROOM_LABELS,
+)
 from control_panel.render import render_html
 
 
@@ -94,3 +100,28 @@ def test_render_html_never_hardcodes_cover_entity_ids():
 
     for entity_id in OFFICE_COVERS + DINING_COVERS:
         assert entity_id not in html
+
+
+def test_render_html_includes_speaker_card_with_both_buttons():
+    html = render_html()
+
+    assert 'data-action="play_relaxing"' in html
+    assert 'data-action="stop"' in html
+    assert "/control/api/speaker/" in html
+
+
+def test_render_html_never_hardcodes_the_alexa_entity_id():
+    # Same reasoning as the cover entities above -- resolved server-side.
+    html = render_html()
+
+    assert ALEXA_ENTITY not in html
+
+
+def test_render_html_reuses_shared_action_button_wiring_for_speaker_and_blinds():
+    # DRY check: the speaker and blind buttons should share one click-wiring
+    # helper rather than duplicating the fetch/status-text/pending pattern.
+    html = render_html()
+
+    assert "function wireActionButtons(" in html
+    assert "wireActionButtons(\n  '.blind-btn'" in html
+    assert "wireActionButtons(\n  '.speaker-btn'" in html

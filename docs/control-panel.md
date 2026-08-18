@@ -91,6 +91,62 @@ optimistic value with a still-stale one -- self-corrects on the next
 poll 30s later, and is far rarer than the original always-reproducible
 bug it replaced.
 
+## Family Room speaker (Alexa)
+
+Added after the thermostat and blinds shipped, for a specific real routine
+the user already has: saying "Alexa, play relaxing music" to the Family
+Room Echo before leaving the house (music for the dogs). The ask included
+a second motivation -- the user's wife has a Russian accent and Alexa
+sometimes fails to understand her, so a button that works identically
+regardless of who presses it, and regardless of accent, is a real
+improvement over the voice command it replaces, not just a shortcut.
+
+**No existing Alexa integration in HA at all** at the time this was
+asked -- confirmed by querying `/api/config/config_entries/entry`, no
+`cloud`/`nabu_casa` (no HA Cloud subscription) and no Alexa-anything.
+HACS was already installed, so the user set up
+[`alandtse/alexa_media_player`](https://github.com/alandtse/alexa_media_player)
+(v5.15.7) as a HACS custom repository -- an unofficial integration that
+logs into the Amazon account the Echos are registered to (a step that had
+to be done by the user directly in HA's UI; entering someone's Amazon
+password isn't something this agent will do). That exposed
+`media_player.jim_s_echo_studio` ("Jim's Echo Studio", Family Room).
+
+**How the command actually gets sent, confirmed from source and live,
+not guessed**: `media_player.play_media` with `media_content_type:
+"custom"` maps (confirmed by reading `alexa_media_player`'s
+`media_player.py` directly, `elif media_type == "custom":`) to the
+integration's `run_custom`, which is Amazon's own "text command" feature
+built for accessibility -- it types the phrase to the device exactly as
+if it had been spoken, rather than going through Alexa's speech
+recognition at all. Live-tested directly via Developer tools -> Actions
+before wiring up a button: `media_content_id: "play relaxing music"`
+against `media_player.jim_s_echo_studio` started the music immediately.
+This is also why the accent problem goes away -- there's no recognition
+step to fail.
+
+Only one phrase was wired up ("play relaxing music" -- the user's actual
+ask, for the dogs), not all three phrases they mentioned using day to day
+(relaxing/yoga/meditation) -- yoga and meditation music are a different
+use case (for people, not the leaving-the-house dog routine) and weren't
+asked for; the user explicitly chose "relaxing music only" when asked.
+A Stop button was added alongside it (the user's choice, "recommended"
+option) using the plain `media_player.media_stop` service -- a normal,
+documented HA media_player service, no special handling needed.
+
+`const.py` holds `ALEXA_ENTITY`, `RELAXING_MUSIC_COMMAND`, and
+`SPEAKER_ACTIONS`; `server.py`'s `POST /control/api/speaker/<action>`
+validates `action` against `SPEAKER_ACTIONS` the same way the blinds
+route validates `room`. The entity ID and the exact command text are
+never sent from the browser, same reasoning as the cover entity IDs.
+
+The blind-button and speaker-button click handlers in `render.py`'s JS
+were refactored into one shared `wireActionButtons()`/`postAction()`
+pair rather than copy-pasting a third near-identical
+fetch/status-text/pending-class block -- both cards are "POST an action,
+show a transient Sent./Failed status" with no live state to track,
+unlike the thermostat card.
+
 ## Architecture
 
 ```
@@ -178,13 +234,16 @@ spec.
 
 ## Verification
 
-- 31 new tests (`control_panel/tests/`) -- `render.py` content assertions,
-  and `ha_client.py`/`server.py` with all HTTP calls mocked (no real
-  token or live calls needed to test), covering: correct entity/service
-  per button (especially the open/close-vs-set_position split), input
-  validation, and both HA-unreachable and HA-error paths surfacing as
-  distinct non-500 responses. `site_shared`'s suite extended for the 4th
-  `PAGES` entry. 259 tests passing across all five packages.
+- 39 tests in `control_panel/tests/` (31 original + 8 added for the
+  speaker feature) -- `render.py` content assertions, and
+  `ha_client.py`/`server.py` with all HTTP calls mocked (no real token or
+  live calls needed to test), covering: correct entity/service per button
+  (especially the open/close-vs-set_position split, and the
+  `media_content_type: custom` text-command call for the speaker), input
+  validation, both HA-unreachable and HA-error paths surfacing as
+  distinct non-500 responses, and that the blind/speaker button click
+  handlers share one `wireActionButtons()` helper rather than duplicating
+  it. `site_shared`'s suite extended for the 4th `PAGES` entry.
 - `node --check` on every extracted `<script>` block, same method used
   for every prior page.
 - Deployed and confirmed live end-to-end through the full public path
@@ -209,13 +268,24 @@ spec.
   hub's own occasional flakiness (see below), which the user confirmed is
   a known, pre-existing limitation of the physical hardware/native app
   too, not something to fix from this project's side.
-- **Temperature +/- was tested live and initially found broken** (see
-  "Real bug" above) -- fixed and confirmed the server was serving the
-  corrected code, but not yet re-confirmed by an actual button press
-  through the page (the caching fix landed in the same session, and the
-  agent's own attempt to verify via simulator mis-tapped a blind button
-  instead -- see below). Mode buttons specifically remain unconfirmed
-  through the real page.
+- **Temperature +/- was tested live, initially found broken, then
+  confirmed fixed** -- see "Real bug" above for the root cause (Nest
+  cloud-sync lag) and the caching fix; the user confirmed live, after a
+  genuine hard refresh, that it now takes one press per degree as
+  expected. Mode buttons use the identical optimistic-update code path
+  but haven't specifically been re-confirmed the same way.
+- **The Family Room speaker button (relaxing music / stop) is built on
+  an unofficial integration** (`alexa_media_player`, not supported by
+  Amazon) that logs in by impersonating the Alexa app -- known to
+  occasionally need re-authentication if Amazon invalidates the session.
+  If the button starts failing with an HA-error response after having
+  worked before, a stale Alexa Media Player login is the first thing to
+  check (Settings -> Devices & Services -> Alexa Media Player), not a
+  bug in this page. The `media_content_type: custom` text-command call
+  itself was live-tested successfully via Developer tools -> Actions
+  before the button existed; the button wiring itself (POST ->
+  `run_custom`) has not yet been separately confirmed through the actual
+  page by the user, only via mocked tests and `node --check`.
 - **An agent-side simulator mis-tap during testing turned out harmless**
   -- coordinate scaling between the simulator's screenshot and its actual
   tap space was miscalibrated, landing on a blind button instead of the

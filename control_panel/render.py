@@ -34,6 +34,11 @@ def _blind_buttons_html(room: str) -> str:
     <button class="blind-btn" data-room="{room}" data-position="0">Close</button>"""
 
 
+def _speaker_buttons_html() -> str:
+    return """<button class="speaker-btn" data-action="play_relaxing">Relaxing Music</button>
+    <button class="speaker-btn" data-action="stop">Stop</button>"""
+
+
 def render_html() -> str:
     room_cards = "\n".join(
         f"""<div class="card">
@@ -98,6 +103,13 @@ header h1{{font-size:20px;font-weight:700}}
   </div>
   <div class="btn-row">
     {_mode_buttons_html()}
+  </div>
+</div>
+
+<div class="card">
+  <h3>Family Room Speaker</h3>
+  <div class="btn-row">
+    {_speaker_buttons_html()}
   </div>
 </div>
 
@@ -212,36 +224,57 @@ document.querySelectorAll('.mode-btn').forEach(function(b) {{
   }});
 }});
 
-document.querySelectorAll('.blind-btn').forEach(function(b) {{
-  b.addEventListener('click', async function() {{
-    const room = b.getAttribute('data-room');
-    const statusEl = b.closest('.card').querySelector('.status-text') || (function() {{
-      const el = document.createElement('div');
-      el.className = 'status-text';
-      b.closest('.card').appendChild(el);
-      return el;
-    }})();
-    b.classList.add('pending');
-    statusEl.textContent = 'Sending...';
-    try {{
-      const resp = await fetch('/control/api/blinds/' + room, {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify({{position: parseInt(b.getAttribute('data-position'), 10)}})
-      }});
-      if (!resp.ok) {{
-        const body = await resp.json().catch(() => ({{}}));
-        statusEl.textContent = 'Failed: ' + (body.message || resp.status);
-      }} else {{
-        statusEl.textContent = 'Sent.';
-      }}
-    }} catch (e) {{
-      statusEl.textContent = 'Could not reach the control panel server.';
+// Shared by every card whose buttons just POST an action and show a
+// transient "Sent."/"Failed: ..." status -- blinds and the speaker both
+// fit this shape, unlike the thermostat card which tracks live state.
+async function postAction(url, body) {{
+  try {{
+    const resp = await fetch(url, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify(body)
+    }});
+    if (!resp.ok) {{
+      const errBody = await resp.json().catch(() => ({{}}));
+      return {{ok: false, message: errBody.message || ('HTTP ' + resp.status)}};
     }}
-    b.classList.remove('pending');
-    setTimeout(function() {{ statusEl.textContent = ''; }}, 4000);
+    return {{ok: true}};
+  }} catch (e) {{
+    return {{ok: false, message: 'Could not reach the control panel server.'}};
+  }}
+}}
+
+function wireActionButtons(selector, urlFor, bodyFor) {{
+  document.querySelectorAll(selector).forEach(function(b) {{
+    b.addEventListener('click', async function() {{
+      const card = b.closest('.card');
+      const statusEl = card.querySelector('.status-text') || (function() {{
+        const el = document.createElement('div');
+        el.className = 'status-text';
+        card.appendChild(el);
+        return el;
+      }})();
+      b.classList.add('pending');
+      statusEl.textContent = 'Sending...';
+      const result = await postAction(urlFor(b), bodyFor(b));
+      statusEl.textContent = result.ok ? 'Sent.' : ('Failed: ' + result.message);
+      b.classList.remove('pending');
+      setTimeout(function() {{ statusEl.textContent = ''; }}, 4000);
+    }});
   }});
-}});
+}}
+
+wireActionButtons(
+  '.blind-btn',
+  function(b) {{ return '/control/api/blinds/' + b.getAttribute('data-room'); }},
+  function(b) {{ return {{position: parseInt(b.getAttribute('data-position'), 10)}}; }}
+);
+
+wireActionButtons(
+  '.speaker-btn',
+  function(b) {{ return '/control/api/speaker/' + b.getAttribute('data-action'); }},
+  function(b) {{ return {{}}; }}
+);
 
 refreshThermostat();
 setInterval(refreshThermostat, 30000);

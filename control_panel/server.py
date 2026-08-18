@@ -14,13 +14,16 @@ from flask import Flask, jsonify, request
 
 from control_panel import ha_client
 from control_panel.const import (
+    ALEXA_ENTITY,
     CLIMATE_ENTITY,
     COVER_MID_POSITION,
     COVER_POSITION_SERVICE,
     HVAC_MODES,
     MAX_TEMPERATURE,
     MIN_TEMPERATURE,
+    RELAXING_MUSIC_COMMAND,
     ROOM_COVERS,
+    SPEAKER_ACTIONS,
 )
 
 app = Flask(__name__)
@@ -104,6 +107,27 @@ def set_blinds_position(room: str):
             ha_client.call_service("cover", "set_cover_position", entities, position=position)
         else:
             ha_client.call_service("cover", COVER_POSITION_SERVICE[position], entities)
+    except (ha_client.HomeAssistantUnreachable, ha_client.HomeAssistantError) as err:
+        return _error_response(err)
+    return jsonify({"ok": True})
+
+
+@app.route("/control/api/speaker/<action>", methods=["POST"])
+def control_speaker(action: str):
+    if action not in SPEAKER_ACTIONS:
+        return jsonify({"error": "invalid_request", "message": f"unknown action {action!r}"}), 400
+
+    try:
+        if action == "play_relaxing":
+            ha_client.call_service(
+                "media_player",
+                "play_media",
+                ALEXA_ENTITY,
+                media_content_type="custom",
+                media_content_id=RELAXING_MUSIC_COMMAND,
+            )
+        else:
+            ha_client.call_service("media_player", "media_stop", ALEXA_ENTITY)
     except (ha_client.HomeAssistantUnreachable, ha_client.HomeAssistantError) as err:
         return _error_response(err)
     return jsonify({"ok": True})

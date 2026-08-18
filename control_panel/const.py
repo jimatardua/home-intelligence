@@ -56,3 +56,15 @@ COVER_POSITION_SERVICE: dict[int, str] = {
     0: "close_cover",
 }
 COVER_MID_POSITION = 50
+
+# Confirmed live (2026-08-18): Home Assistant's `media_player.play_media`
+# with `media_content_type: "custom"` sends `media_content_id` to the
+# Alexa Media Player integration's `run_custom` -- Amazon's own "text
+# command" feature (built for accessibility), which types the phrase to
+# the device exactly as if it had been spoken. It bypasses Alexa's speech
+# recognition entirely, which is the whole point here.
+ALEXA_ENTITY = "media_player.jim_s_echo_studio"  # Family Room Echo Studio
+RELAXING_MUSIC_COMMAND = "play relaxing music"
+
+# The set of button actions server.py accepts for the speaker card.
+SPEAKER_ACTIONS = ("play_relaxing", "stop")
