@@ -6,6 +6,19 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.39] - 2026-08-18
+
+- Add `Cache-Control: no-store` to both `/control/` nginx locations,
+  after a live debugging session where a genuinely-fixed bug (the
+  two-press thermostat issue, v1.0.38) still appeared unfixed to the
+  user -- confirmed via `curl` that the server was serving the corrected
+  code the whole time; neither location had any explicit cache header,
+  and the browser tab likely hadn't done a full reload. Closes the whole
+  class of "did my fix actually reach the browser" confusion for this
+  actively-iterated page. The other three pages were deliberately left
+  unchanged -- different regeneration cadence, haven't shown the symptom,
+  no reason to apply this on spec.
+
 ## [1.0.38] - 2026-08-18
 
 - Fix a real control-panel bug found live: the thermostat +/- and mode

@@ -48,9 +48,11 @@ Add to /etc/nginx-ha-proxy/default.conf, ABOVE the existing catch-all
     location /control/ {
         alias /opt/home-intelligence/control_panel/output/;
         try_files $uri $uri/ =404;
+        add_header Cache-Control "no-store";
     }
     location /control/api/ {
         proxy_pass http://127.0.0.1:8765/control/api/;
+        add_header Cache-Control "no-store";
     }
 
 --- 4. Recreate the ha-proxy container (adds one bind mount) ---------------

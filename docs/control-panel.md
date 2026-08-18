@@ -162,6 +162,20 @@ only the new page's static-output directory does, which is the one new
 `-v` line in the container recreate (same pattern already done twice for
 `cigar_dashboard`/`energy_report`).
 
+Both `/control/` location blocks send `Cache-Control: no-store` --
+added after a live debugging session where a genuinely-fixed bug
+(see "Real bug" below) still appeared unfixed to the user, because
+neither location had any explicit cache header and there was no
+cache-busting on the script itself. Confirmed the server was serving
+the corrected code the whole time (`curl` matched the fix byte-for-byte);
+the likely cause was the browser tab not doing a full reload. Rather than
+just asking for a hard-refresh, closed the whole class of "did my fix
+actually reach the browser" confusion for this actively-iterated page --
+the other three pages regenerate on a cron/polling cadence, aren't
+edited nearly as often, and haven't shown this symptom, so they were
+deliberately left unchanged rather than applying this everywhere on
+spec.
+
 ## Verification
 
 - 31 new tests (`control_panel/tests/`) -- `render.py` content assertions,
@@ -195,10 +209,23 @@ only the new page's static-output directory does, which is the one new
   hub's own occasional flakiness (see below), which the user confirmed is
   a known, pre-existing limitation of the physical hardware/native app
   too, not something to fix from this project's side.
-- **Thermostat mode buttons and the temperature +/- pair have not been
-  pressed for real yet** -- temperature adjustment specifically was added
-  after the blind testing above, so it's untested end-to-end through the
-  actual page. Worth doing once, deliberately.
+- **Temperature +/- was tested live and initially found broken** (see
+  "Real bug" above) -- fixed and confirmed the server was serving the
+  corrected code, but not yet re-confirmed by an actual button press
+  through the page (the caching fix landed in the same session, and the
+  agent's own attempt to verify via simulator mis-tapped a blind button
+  instead -- see below). Mode buttons specifically remain unconfirmed
+  through the real page.
+- **An agent-side simulator mis-tap during testing turned out harmless**
+  -- coordinate scaling between the simulator's screenshot and its actual
+  tap space was miscalibrated, landing on a blind button instead of the
+  intended temperature control. Initially assumed "Open" was hit; the
+  user's follow-up (blinds stayed at their existing mid position,
+  unaffected) points to "Mid" being the actual target instead -- a
+  same-state resend with no visible effect, not "Open" silently failing.
+  Lesson: don't guess coordinates against a live control surface with
+  real physical side effects; verify the tool's actual coordinate space
+  before tapping, or ask the user to test interactively instead.
 - **No guaranteed backup reserve or confirmation step** -- every button
   fires immediately on tap, no "are you sure." Given the confirmed-low
   stakes (blinds and a thermostat, not anything safety-critical) this is
