@@ -105,8 +105,10 @@ named (`disaggChart`/`peakChart`/`tempChart`, previously anonymous) so
 
 ### Navigation
 
-`nav.render_nav_html(active_page)` renders the 3 page links (current page
-highlighted). No manual light/dark/auto control exists anywhere -- see
+`nav.render_nav_html(active_page)` renders links for every page in
+`PAGES` (current page highlighted) -- 4 as of `control_panel`'s addition
+(`docs/control-panel.md`), originally 3. No manual light/dark/auto
+control exists anywhere -- see
 "Theming," below -- so every page uses the shared component's default
 top-bar layout unmodified, including the kiosk (`home_dashboard`), which
 originally had its own small-corner CSS override for a now-removed
@@ -117,10 +119,12 @@ navigation" below for why) but the *reason* for it changed.
 
 `nav.render_swipe_nav_script(active_page)` -- a horizontal touch swipe
 past a threshold navigates to the next/previous page in `PAGES`' fixed
-order (Home <-> Cigars <-> Energy). This is a real page navigation (full
-reload), not an animated slide-over -- these are three separate static
-pages, not a single-page app, matching every other page in this repo;
-building a true slide transition would mean loading all three
+order (Home <-> Cigars <-> Energy <-> Control). This is a real page
+navigation (full reload), not an animated slide-over -- these are
+separate static pages, not a single-page app, matching every other page
+in this repo (`control_panel` included, despite talking to a live
+backend -- see `docs/control-panel.md`); building a true slide transition
+would mean loading all of them
 simultaneously (iframes or a full SPA rewrite), a real architecture
 change for a cosmetic win. Reuses the same PWA-scope fix below, so it
 stays inside the installed app rather than kicking out to browser chrome.
@@ -138,8 +142,9 @@ same script also hides `.site-nav` entirely on any touch-capable device
 swipe works, the link row is redundant there, and hiding it (rather than
 reskinning it small, which is what the kiosk's own corner-CSS override
 originally did for a different reason -- fitting inside its hand-tuned
-100vh layout) is what actually makes all three pages' look consistent on
-an iPad/iPhone: nothing shows on any of them. Non-touch visitors (e.g. a
+100vh layout) is what actually makes every page's look consistent on an
+iPad/iPhone: nothing shows on any of them (including `control_panel`,
+added after this was written -- same behavior, no extra work needed). Non-touch visitors (e.g. a
 laptop browser loading these URLs directly) keep the visible links, since
 swipe isn't available to them as a substitute -- `cigar_dashboard`/
 `energy_report` are still meant to be normally browsable, not touch-only.

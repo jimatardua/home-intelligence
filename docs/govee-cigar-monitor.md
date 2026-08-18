@@ -393,3 +393,6 @@ advertisements confirmed flowing within seconds.
 - [ ] A genuine 7-day history hasn't accumulated yet -- charts are correct
       given the data that exists, but haven't been seen with a full week
       of real trend lines
+- [x] Nav now links to a 4th page, `control_panel` (`/control/`) --
+      no changes needed here beyond `site_shared.nav.PAGES` gaining an
+      entry. See `docs/control-panel.md`.

@@ -538,3 +538,6 @@ current, so it goes blank instead.
       look-and-feel inconsistency between this page's compact corner nav
       and the other two pages' full top bar (all three now show nothing
       on an iPad). Full writeup in `docs/site-shared.md`.
+- [x] Nav now links to a 4th page, `control_panel` (`/control/`) --
+      no changes needed here beyond `site_shared.nav.PAGES` gaining an
+      entry. See `docs/control-panel.md`.

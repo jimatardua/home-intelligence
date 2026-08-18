@@ -64,9 +64,16 @@ def test_neighbor_hrefs_middle_page_has_both():
     assert next_href == "/energy-report/"
 
 
-def test_neighbor_hrefs_last_page_has_no_next():
+def test_neighbor_hrefs_third_page_now_has_both_neighbors():
+    # energy-report used to be last; control was added after it.
     prev_href, next_href = _neighbor_hrefs("energy-report")
     assert prev_href == "/cigars/"
+    assert next_href == "/control/"
+
+
+def test_neighbor_hrefs_last_page_has_no_next():
+    prev_href, next_href = _neighbor_hrefs("control")
+    assert prev_href == "/energy-report/"
     assert next_href is None
 
 
@@ -92,9 +99,9 @@ def test_render_swipe_nav_script_first_page_prev_is_null():
 
 
 def test_render_swipe_nav_script_last_page_next_is_null():
-    html = render_swipe_nav_script("energy-report")
+    html = render_swipe_nav_script("control")
 
-    assert 'prevHref = "/cigars/"' in html
+    assert 'prevHref = "/energy-report/"' in html
     assert "nextHref = null" in html
 
 

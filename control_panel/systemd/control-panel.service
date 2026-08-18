@@ -1,0 +1,16 @@
+[Unit]
+Description=Control panel backend (thermostat + blinds -> Home Assistant)
+After=network.target
+
+[Service]
+Type=simple
+User=jramsey
+Group=jramsey
+WorkingDirectory=/opt/home-intelligence
+EnvironmentFile=/etc/home-intelligence-control-panel.env
+ExecStart=/usr/bin/python3 -m control_panel.server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

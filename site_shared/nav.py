@@ -16,6 +16,7 @@ PAGES: dict[str, tuple[str, str]] = {
     "dashboard": ("/dashboard/", "Home"),
     "cigars": ("/cigars/", "Cigars"),
     "energy-report": ("/energy-report/", "Energy"),
+    "control": ("/control/", "Control"),
 }
 
 NAV_STYLE = """

@@ -6,6 +6,31 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.36] - 2026-08-18
+
+- Add a 4th dashboard page, `control_panel` (`/control/`) -- thermostat
+  mode (off/cool/heat) and per-room blind position (open/mid/close for
+  Office and Dining) for the Family Room Nest and the 7 `neosmartblinds`
+  cover entities. The first thing in this project that writes to Home
+  Assistant rather than only reading the recorder database: a new small
+  Flask backend (`control_panel/server.py`, systemd-managed, binds
+  127.0.0.1 only) holds a long-lived HA token server-side and forwards
+  button presses to HA's REST API -- the token never reaches the browser.
+  Deliberately doesn't track or display cover position at all: HA's own
+  tracking of it is a software estimate with no real physical feedback,
+  and was confirmed live to visibly desync from reality after using the
+  "mid" button (matching what the user had already noticed in HA's own
+  UI). Also confirmed live, from both directions, why the 0%/100% buttons
+  use `cover.open_cover`/`close_cover` while only mid uses
+  `set_cover_position`: repeated `set_cover_position` calls silently
+  no-op after the first one from a given extreme; the dedicated services
+  don't have that problem. `site_shared.nav.PAGES` gained a 4th entry --
+  the swipe-nav/nav-hide logic added for the first three pages needed no
+  code changes to extend to a 4th, just the one new dict entry. 31 new
+  tests (mocked HA calls, no real token needed to test); 252 across all
+  five packages. Full writeup, including the live findings above, in
+  `docs/control-panel.md`.
+
 ## [1.0.35] - 2026-08-18
 
 - Remove the light/dark/auto theme toggle entirely (from every page, not

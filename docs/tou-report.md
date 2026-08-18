@@ -372,6 +372,9 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
       on any touch-capable device (swipe replaces them there) -- confirmed
       via a real iPad simulator that `.site-nav` is fully hidden on this
       page. Full writeup in `docs/site-shared.md`.
+- [x] Nav now links to a 4th page, `control_panel` (`/control/`) --
+      no changes needed here beyond `site_shared.nav.PAGES` gaining an
+      entry. See `docs/control-panel.md`.
 
 ## Phase 2 (deferred): AI narrative layer
 
