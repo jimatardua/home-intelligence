@@ -66,6 +66,31 @@ The client tracks the last-fetched target temp and computes `+/- step`
 from that rather than re-deriving it, same pattern the blinds buttons use
 for "what room am I acting on."
 
+**Real bug, found live and fixed the same day**: it took exactly two
+presses to register one degree of change, every time -- confirmed by the
+user, who'd already ruled out a focus/click-registration issue by
+deliberately clicking elsewhere on the page first. Root cause: the Nest
+is cloud-synced (Google's SDM API), not a local device -- `climate.set_temperature`
+returning success only means HA accepted and dispatched the request, not
+that the thermostat has confirmed the change back yet (a real few-second
+round trip). The original code called `refreshThermostat()` immediately
+after every successful POST, which raced that lag and read back the
+*old* value, undoing the button's own visible effect until the next
+press happened to land after the cloud had caught up. Same underlying
+bug affected the mode buttons too, just less noticeably (a color flip
+eventually happening is less jarring than a specific number not moving).
+**Fixed by updating the display optimistically** from what was just
+successfully requested, and only re-fetching after a delay
+(`REFRESH_AFTER_ACTION_MS`, 4s) long enough for the round trip to have
+actually landed -- that delayed refresh (plus the existing 30s periodic
+poll) still catches a genuine failure, just not instantly. One small
+residual case, judged not worth the added complexity to close: if the
+30-second periodic poll happens to fire during that few-second cloud-lag
+window right after a click, it could transiently overwrite the
+optimistic value with a still-stale one -- self-corrects on the next
+poll 30s later, and is far rarer than the original always-reproducible
+bug it replaced.
+
 ## Architecture
 
 ```
@@ -145,7 +170,7 @@ only the new page's static-output directory does, which is the one new
   per button (especially the open/close-vs-set_position split), input
   validation, and both HA-unreachable and HA-error paths surfacing as
   distinct non-500 responses. `site_shared`'s suite extended for the 4th
-  `PAGES` entry. 258 tests passing across all five packages.
+  `PAGES` entry. 259 tests passing across all five packages.
 - `node --check` on every extracted `<script>` block, same method used
   for every prior page.
 - Deployed and confirmed live end-to-end through the full public path

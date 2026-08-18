@@ -6,6 +6,20 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.38] - 2026-08-18
+
+- Fix a real control-panel bug found live: the thermostat +/- and mode
+  buttons needed two presses to register one change. Root cause: the
+  Nest is cloud-synced (Google's SDM API), so a successful
+  `climate.set_temperature`/`set_hvac_mode` call only means HA accepted
+  and dispatched the request, not that the thermostat has confirmed the
+  change back yet -- the page was re-fetching immediately after every
+  POST, racing that lag and reading back the stale pre-change value.
+  Fixed by updating the display optimistically from what was just
+  successfully requested, with a delayed reconciliation refresh (4s)
+  rather than an immediate one. 1 new test locking in the fix pattern
+  (259 total across all five packages).
+
 ## [1.0.37] - 2026-08-18
 
 - Add target-temperature +/- controls to the control panel's thermostat

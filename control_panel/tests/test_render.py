@@ -69,6 +69,24 @@ def test_render_html_includes_temperature_adjust_buttons():
     assert "adjustTargetTemp" in html
 
 
+def test_render_html_updates_temp_and_mode_optimistically_not_via_immediate_refetch():
+    # Real bug, confirmed live: the Nest is cloud-synced, so re-fetching
+    # immediately after a POST races the cloud round-trip and reads back
+    # the *old* value -- it took two presses to register one degree of
+    # change. Fix is to update the display from what was just
+    # successfully requested, then only re-fetch after a delay.
+    html = render_html()
+
+    assert "lastTargetTemp = next" in html
+    assert "renderThermoInfo()" in html
+    assert "setTimeout(refreshThermostat, REFRESH_AFTER_ACTION_MS)" in html
+    # The old bug pattern: refreshThermostat() called with no delay
+    # immediately after a POST resolves, inside adjustTargetTemp/the mode
+    # button handler specifically (the closing `refreshThermostat();` on
+    # its own line, not the setTimeout-wrapped or initial-load calls).
+    assert "\n  refreshThermostat();\n" not in html
+
+
 def test_render_html_never_hardcodes_cover_entity_ids():
     # The page only ever talks to /control/api/blinds/<room> -- entity IDs
     # are resolved server-side (server.py), never sent from the browser.

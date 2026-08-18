@@ -112,7 +112,29 @@ function clearHaError() {{
   document.getElementById('ha-error-banner').style.display = 'none';
 }}
 
+let lastCurrentTemp = null;
 let lastTargetTemp = null;
+
+// The Nest is cloud-synced (Google's SDM API), not a local device -- a
+// service call returning success only means HA accepted and dispatched
+// the request, not that the thermostat has actually confirmed the change
+// back yet (commonly a few real seconds of lag). Refreshing immediately
+// after a POST was racing that lag and reading back the *old* value,
+// undoing the button's own visible effect -- confirmed live: it took
+// exactly two presses to register one degree of change, every time.
+// Fix: update the display optimistically from what we just successfully
+// asked for, and only re-fetch after a delay long enough for the cloud
+// round trip to have actually landed (a genuine failure -- the request
+// silently not taking effect on the real device -- still gets caught by
+// this delayed refresh, or the periodic poll below, just not instantly).
+const REFRESH_AFTER_ACTION_MS = 4000;
+
+function renderThermoInfo() {{
+  const cur = lastCurrentTemp != null ? Math.round(lastCurrentTemp) + '°' : '--';
+  const tgt = lastTargetTemp != null ? lastTargetTemp + '°' : '--';
+  document.getElementById('thermo-info').textContent = cur + ' now, set to ' + tgt;
+  document.getElementById('temp-target-value').textContent = tgt;
+}}
 
 async function refreshThermostat() {{
   try {{
@@ -124,11 +146,9 @@ async function refreshThermostat() {{
     }}
     clearHaError();
     const d = await resp.json();
-    const cur = d.current_temp != null ? Math.round(d.current_temp) + '°' : '--';
-    const tgt = d.target_temp != null ? Math.round(d.target_temp) + '°' : '--';
-    document.getElementById('thermo-info').textContent = cur + ' now, set to ' + tgt;
-    document.getElementById('temp-target-value').textContent = tgt;
+    lastCurrentTemp = d.current_temp;
     lastTargetTemp = d.target_temp != null ? Math.round(d.target_temp) : null;
+    renderThermoInfo();
     document.querySelectorAll('.mode-btn').forEach(function(b) {{
       b.classList.toggle('active', b.getAttribute('data-mode') === d.mode);
     }});
@@ -150,13 +170,16 @@ async function adjustTargetTemp(delta) {{
     if (!resp.ok) {{
       const body = await resp.json().catch(() => ({{}}));
       showHaError(body.message || ('Temperature change failed (' + resp.status + ')'));
-    }} else {{
-      clearHaError();
+      return;
     }}
+    clearHaError();
+    lastTargetTemp = next;
+    renderThermoInfo();
   }} catch (e) {{
     showHaError('Could not reach the control panel server.');
+    return;
   }}
-  refreshThermostat();
+  setTimeout(refreshThermostat, REFRESH_AFTER_ACTION_MS);
 }}
 
 document.getElementById('temp-down').addEventListener('click', function() {{ adjustTargetTemp(-{TEMPERATURE_STEP}); }});
@@ -164,24 +187,28 @@ document.getElementById('temp-up').addEventListener('click', function() {{ adjus
 
 document.querySelectorAll('.mode-btn').forEach(function(b) {{
   b.addEventListener('click', async function() {{
+    const mode = b.getAttribute('data-mode');
     b.classList.add('pending');
     try {{
       const resp = await fetch('/control/api/thermostat', {{
         method: 'POST',
         headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify({{mode: b.getAttribute('data-mode')}})
+        body: JSON.stringify({{mode: mode}})
       }});
       if (!resp.ok) {{
         const body = await resp.json().catch(() => ({{}}));
         showHaError(body.message || ('Mode change failed (' + resp.status + ')'));
       }} else {{
         clearHaError();
+        document.querySelectorAll('.mode-btn').forEach(function(btn) {{
+          btn.classList.toggle('active', btn === b);
+        }});
       }}
     }} catch (e) {{
       showHaError('Could not reach the control panel server.');
     }}
     b.classList.remove('pending');
-    refreshThermostat();
+    setTimeout(refreshThermostat, REFRESH_AFTER_ACTION_MS);
   }});
 }});
 
