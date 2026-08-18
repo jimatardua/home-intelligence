@@ -364,6 +364,10 @@ stdlib-only in production; pytest is a dev-only dependency in a scoped
       redraw wiring -- this page's `<meta http-equiv="refresh">` reload
       already covers it. See `docs/rmp-integration.md`'s "Staleness
       alert" section.
+- [x] Swipe-to-navigate between the three pages (`nav.render_swipe_nav_script`
+      in `site_shared`). Full writeup in `docs/site-shared.md`. Not yet
+      verified on a physical device/simulator -- see that doc's "Swipe
+      navigation" section.
 
 ## Phase 2 (deferred): AI narrative layer
 

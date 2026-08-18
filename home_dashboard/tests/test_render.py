@@ -175,6 +175,17 @@ def test_render_html_includes_shared_nav_links_no_toggle():
     assert "data-theme-choice" not in html
 
 
+def test_render_html_includes_swipe_nav_despite_no_toggle():
+    # Kiosk decision: swipe nav is included even though the interactive
+    # toggle isn't -- a swipe gesture isn't an extra on-screen tap target
+    # competing for space in the hand-tuned kiosk layout the way the
+    # toggle would be.
+    html = render_html(_minimal_context())
+
+    assert "prevHref = null" in html
+    assert 'nextHref = "/cigars/"' in html
+
+
 def test_render_html_includes_shared_theme_css():
     html = render_html(_minimal_context())
 

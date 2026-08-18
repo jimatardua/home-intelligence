@@ -345,6 +345,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 {load_icon_sprite()}
 {nav.render_nav_html("dashboard", show_toggle=False)}
 {theme.render_theme_watch_script()}
+{nav.render_swipe_nav_script("dashboard")}
 
 <div class="hero">
   <div class="hero-stats">

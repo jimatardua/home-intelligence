@@ -166,6 +166,7 @@ h1{{font-size:min(4vw,28px);font-weight:800}}
 <body>
 
 {nav.render_nav_html("cigars")}
+{nav.render_swipe_nav_script("cigars")}
 
 <div>
   <h1>Cigar Storage</h1>

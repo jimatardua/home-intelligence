@@ -210,6 +210,15 @@ def test_render_html_includes_shared_nav_linking_all_three_pages():
     assert 'href="/energy-report/"' in html
 
 
+def test_render_html_includes_swipe_nav_to_both_neighbors():
+    ctx = _minimal_context()
+
+    html = render_html(ctx)
+
+    assert 'prevHref = "/dashboard/"' in html
+    assert 'nextHref = "/energy-report/"' in html
+
+
 def test_render_html_includes_theme_toggle():
     ctx = _minimal_context()
 

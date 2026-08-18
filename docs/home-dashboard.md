@@ -525,3 +525,9 @@ current, so it goes blank instead.
       `generate_pwa_icons.py` fixes the earlier non-reproducibility gap
       noted below (the icons themselves weren't changed, just made
       reproducible going forward).
+- [x] Swipe-to-navigate between the three pages (`nav.render_swipe_nav_script`
+      in `site_shared`) -- included on this page despite the no-toggle
+      kiosk decision above, since a swipe gesture doesn't cost an
+      on-screen tap target. Full writeup in `docs/site-shared.md`. Not yet
+      verified on a physical device/simulator -- see that doc's "Swipe
+      navigation" section.

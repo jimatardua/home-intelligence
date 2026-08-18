@@ -6,6 +6,23 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.34] - 2026-08-15
+
+- Add swipe-to-navigate between the three dashboards (`nav.render_swipe_nav_script`
+  in `site_shared`). A horizontal swipe past a threshold does a real page
+  navigation to the next/previous page in Home <-> Cigars <-> Energy order
+  (not an animated slide -- these stay three separate static pages, no
+  wraparound at either end). Included on the kiosk (`home_dashboard`)
+  alongside the two browsable pages, unlike the theme toggle, since a
+  swipe gesture doesn't cost an on-screen tap target the way a button
+  would in that page's hand-tuned layout. 8 new unit tests for the pure
+  neighbor-computation logic plus a presence check on each page; every
+  script block across all three pages re-verified with `node --check`
+  after the change. Deployed and confirmed live via `curl` on all three
+  URLs. Not yet verified on a physical device or the iOS Simulator --
+  this Mac's Xcode install isn't complete enough for the simulator tool
+  to attach; see `docs/site-shared.md`'s "Swipe navigation" section.
+
 ## [1.0.33] - 2026-08-14
 
 - Document a real incident in `hardware.md`'s domus section: a Docker

@@ -77,6 +77,13 @@ def test_render_report_includes_shared_nav_linking_all_three_pages():
     assert 'href="/energy-report/" class="active"' in html
 
 
+def test_render_report_includes_swipe_nav_with_no_next_page():
+    html = render_report(_minimal_ctx())
+
+    assert 'prevHref = "/cigars/"' in html
+    assert "nextHref = null" in html
+
+
 def test_render_report_includes_theme_toggle():
     html = render_report(_minimal_ctx())
 

@@ -293,6 +293,7 @@ footer{{text-align:center;font-size:11px;color:var(--muted);padding:10px 0}}
 <body>
 <div class="wrap">
 {nav.render_nav_html("energy-report")}
+{nav.render_swipe_nav_script("energy-report")}
 <header>
   <h1>Rocky Mountain Power: Standard vs. Time-of-Use</h1>
   <span class="meta">Data as of {data_as_of_str} &nbsp;·&nbsp; <a href="." style="color:rgba(255,255,255,.6)">&#8635; refresh</a></span>

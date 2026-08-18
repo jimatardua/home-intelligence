@@ -101,6 +101,41 @@ so it doesn't compete for space in that page's flex-column vh budget at
 all -- the other two pages use the shared component's default top-bar
 layout unmodified.
 
+### Swipe navigation
+
+`nav.render_swipe_nav_script(active_page)` -- a horizontal touch swipe
+past a threshold navigates to the next/previous page in `PAGES`' fixed
+order (Home <-> Cigars <-> Energy). This is a real page navigation (full
+reload), not an animated slide-over -- these are three separate static
+pages, not a single-page app, matching every other page in this repo;
+building a true slide transition would mean loading all three
+simultaneously (iframes or a full SPA rewrite), a real architecture
+change for a cosmetic win. Reuses the same PWA-scope fix below, so it
+stays inside the installed app rather than kicking out to browser chrome.
+
+Neighbor computation (`_neighbor_hrefs()`) is pure and unit-tested
+separately from the JS it feeds -- the script itself is a small, generic
+touchstart/touchend handler with no page-specific logic, consuming
+whatever `prevHref`/`nextHref` string literals (or `null` at either end)
+Python computed. No wraparound: swiping past the last page does nothing
+rather than surprise-landing back at the first.
+
+**Included on the kiosk** (`home_dashboard`), unlike the toggle -- a swipe
+gesture isn't an extra on-screen tap target competing for space in the
+hand-tuned kiosk layout the way the toggle would have been, so the same
+"unattended device, minimize interactive surface" reasoning that excluded
+the toggle didn't apply here.
+
+Threshold (`_SWIPE_MIN_PX = 60`, off-axis ratio `0.5`) is a starting
+point, not a measured value -- **not verified on a physical device or
+simulator**: this Mac's Xcode install isn't complete enough for the
+native iOS Simulator tool to attach, so gesture feel/threshold tuning
+still needs a real swipe on the actual iPad/iPhone. Everything checkable
+without a touchscreen was checked: unit tests for the neighbor
+computation and script content, `node --check` on every extracted
+`<script>` block across all three pages, and live `curl` confirmation of
+the correct `prevHref`/`nextHref` values on each deployed page.
+
 ### PWA scope fix (not new infrastructure)
 
 `home_dashboard/render.py`'s `render_manifest_json()` changed `"scope": "."`

@@ -371,6 +371,10 @@ advertisements confirmed flowing within seconds.
       cron'd 4am America/Denver on mrteeny) -- added after the BlueZ
       wedge recurred a second time (2026-08-10, 2026-08-14). See
       "Preemptive nightly BLE reset" above.
+- [x] Swipe-to-navigate between the three pages (`nav.render_swipe_nav_script`
+      in `site_shared`). Full writeup in `docs/site-shared.md`. Not yet
+      verified on a physical device/simulator -- see that doc's "Swipe
+      navigation" section.
 - [ ] Visually reviewed in an actual browser at
       `https://domus.ardua.com/cigars/` (built and verified via `curl`
       and direct file inspection so far, not yet eyeballed live)
