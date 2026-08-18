@@ -13,7 +13,14 @@ from __future__ import annotations
 
 from site_shared import nav, theme
 
-from control_panel.const import HVAC_MODE_LABELS, HVAC_MODES, ROOM_LABELS
+from control_panel.const import (
+    HVAC_MODE_LABELS,
+    HVAC_MODES,
+    MAX_TEMPERATURE,
+    MIN_TEMPERATURE,
+    ROOM_LABELS,
+    TEMPERATURE_STEP,
+)
 
 
 def _mode_buttons_html() -> str:
@@ -62,6 +69,9 @@ header h1{{font-size:20px;font-weight:700}}
 .btn-row{{display:flex;gap:8px;flex-wrap:wrap}}
 .btn-row button{{flex:1;min-width:80px;padding:14px 10px;border:none;border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;font-weight:600;cursor:pointer}}
 .mode-btn.active{{background:var(--accent);color:#fff}}
+.temp-adjust{{display:flex;align-items:center;gap:16px;margin-bottom:14px}}
+.temp-btn{{width:44px;height:44px;flex:none;border-radius:50%;border:none;background:var(--bg);color:var(--text);font-size:20px;font-weight:700;cursor:pointer}}
+#temp-target-value{{font-size:26px;font-weight:700;min-width:64px;text-align:center}}
 .blind-btn.pending{{opacity:.6}}
 .status-text{{font-size:12px;color:var(--muted);margin-top:8px;min-height:16px}}
 </style>
@@ -81,6 +91,11 @@ header h1{{font-size:20px;font-weight:700}}
 <div class="card">
   <h3>Family Room Thermostat</h3>
   <div class="thermo-info" id="thermo-info">Loading...</div>
+  <div class="temp-adjust">
+    <button class="temp-btn" id="temp-down">&minus;</button>
+    <span id="temp-target-value">--°</span>
+    <button class="temp-btn" id="temp-up">+</button>
+  </div>
   <div class="btn-row">
     {_mode_buttons_html()}
   </div>
@@ -97,6 +112,8 @@ function clearHaError() {{
   document.getElementById('ha-error-banner').style.display = 'none';
 }}
 
+let lastTargetTemp = null;
+
 async function refreshThermostat() {{
   try {{
     const resp = await fetch('/control/api/thermostat');
@@ -110,6 +127,8 @@ async function refreshThermostat() {{
     const cur = d.current_temp != null ? Math.round(d.current_temp) + '°' : '--';
     const tgt = d.target_temp != null ? Math.round(d.target_temp) + '°' : '--';
     document.getElementById('thermo-info').textContent = cur + ' now, set to ' + tgt;
+    document.getElementById('temp-target-value').textContent = tgt;
+    lastTargetTemp = d.target_temp != null ? Math.round(d.target_temp) : null;
     document.querySelectorAll('.mode-btn').forEach(function(b) {{
       b.classList.toggle('active', b.getAttribute('data-mode') === d.mode);
     }});
@@ -117,6 +136,31 @@ async function refreshThermostat() {{
     showHaError('Could not reach the control panel server.');
   }}
 }}
+
+async function adjustTargetTemp(delta) {{
+  if (lastTargetTemp == null) return;
+  const next = Math.min({MAX_TEMPERATURE}, Math.max({MIN_TEMPERATURE}, lastTargetTemp + delta));
+  if (next === lastTargetTemp) return;
+  try {{
+    const resp = await fetch('/control/api/thermostat', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{temperature: next}})
+    }});
+    if (!resp.ok) {{
+      const body = await resp.json().catch(() => ({{}}));
+      showHaError(body.message || ('Temperature change failed (' + resp.status + ')'));
+    }} else {{
+      clearHaError();
+    }}
+  }} catch (e) {{
+    showHaError('Could not reach the control panel server.');
+  }}
+  refreshThermostat();
+}}
+
+document.getElementById('temp-down').addEventListener('click', function() {{ adjustTargetTemp(-{TEMPERATURE_STEP}); }});
+document.getElementById('temp-up').addEventListener('click', function() {{ adjustTargetTemp({TEMPERATURE_STEP}); }});
 
 document.querySelectorAll('.mode-btn').forEach(function(b) {{
   b.addEventListener('click', async function() {{

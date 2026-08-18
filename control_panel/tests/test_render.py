@@ -60,6 +60,15 @@ def test_render_html_fetches_thermostat_and_calls_blinds_api():
     assert "/control/api/blinds/" in html
 
 
+def test_render_html_includes_temperature_adjust_buttons():
+    html = render_html()
+
+    assert 'id="temp-down"' in html
+    assert 'id="temp-up"' in html
+    assert 'id="temp-target-value"' in html
+    assert "adjustTargetTemp" in html
+
+
 def test_render_html_never_hardcodes_cover_entity_ids():
     # The page only ever talks to /control/api/blinds/<room> -- entity IDs
     # are resolved server-side (server.py), never sent from the browser.

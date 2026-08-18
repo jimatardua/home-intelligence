@@ -50,6 +50,22 @@ that's how they're actually used.
   deliberately excluded (never used, and needs two setpoints instead of
   one, real added complexity for a mode nobody wants).
 
+## Target temperature (+/-)
+
+Added right after the first live pass, once mode-only turned out to be
+missing the obvious other control -- a +/- pair around the target-temp
+display, `climate.set_temperature`. Single setpoint only, same
+`heat_cool`-excluded reasoning as the mode buttons above applies here too
+(a low/high range would need two numbers, not one). Step size and the
+0-90/50 sanity bounds live in `const.py`
+(`TEMPERATURE_STEP`/`MIN_TEMPERATURE`/`MAX_TEMPERATURE`) -- the bounds are
+a guard against an obviously-wrong value (e.g. a stray digit), not an
+attempt to enforce the thermostat's real min/max, which HA/the Nest
+integration itself already does and will reject on its own if violated.
+The client tracks the last-fetched target temp and computes `+/- step`
+from that rather than re-deriving it, same pattern the blinds buttons use
+for "what room am I acting on."
+
 ## Architecture
 
 ```
@@ -129,7 +145,7 @@ only the new page's static-output directory does, which is the one new
   per button (especially the open/close-vs-set_position split), input
   validation, and both HA-unreachable and HA-error paths surfacing as
   distinct non-500 responses. `site_shared`'s suite extended for the 4th
-  `PAGES` entry. 252 tests passing across all five packages.
+  `PAGES` entry. 258 tests passing across all five packages.
 - `node --check` on every extracted `<script>` block, same method used
   for every prior page.
 - Deployed and confirmed live end-to-end through the full public path
@@ -149,20 +165,28 @@ only the new page's static-output directory does, which is the one new
 
 ## Known risks / things not verified
 
-- **The actual page buttons have not been pressed yet** -- the backend
-  logic is tested (mocked) and the underlying HA API behavior was
-  validated live for the single-blind case, but nobody has yet tapped
-  "Office Open" (aggregate, 4 blinds at once) or a thermostat mode button
-  through the real page. Worth doing once, deliberately, before trusting
-  this day-to-day.
+- **Blind buttons confirmed live by the user through the real page** --
+  Office and Dining both tested; behaves correctly, subject to the RF
+  hub's own occasional flakiness (see below), which the user confirmed is
+  a known, pre-existing limitation of the physical hardware/native app
+  too, not something to fix from this project's side.
+- **Thermostat mode buttons and the temperature +/- pair have not been
+  pressed for real yet** -- temperature adjustment specifically was added
+  after the blind testing above, so it's untested end-to-end through the
+  actual page. Worth doing once, deliberately.
 - **No guaranteed backup reserve or confirmation step** -- every button
   fires immediately on tap, no "are you sure." Given the confirmed-low
   stakes (blinds and a thermostat, not anything safety-critical) this is
   a deliberate simplicity choice, not an oversight, but worth reconsidering
   if a mis-tap ever turns out to be annoying in practice.
-- **The blind hub's occasional flakiness** (a real `TimeoutError` was hit
-  once during today's testing, for a different blind than the one being
-  tested) means a button press can fail even when everything on this
-  project's side is working correctly. The page surfaces this as an error
-  message rather than hiding it, but there's no retry logic -- pressing
-  the button again is the current mitigation.
+- **The blind hub's occasional flakiness is real and confirmed, not
+  theoretical** -- a `TimeoutError` was hit once during earlier testing,
+  and separately, live user testing of the office room button hit a
+  partial-command case (only 3 of 4 blinds moved on one press) and a
+  reported timeout that still ended up moving the blind anyway. The user
+  confirmed this matches known, pre-existing behavior from HA's own UI
+  and the native app -- a physical RF-hub limitation, not something to
+  fix from this project's side. The page surfaces failures as an error
+  message rather than hiding them, but there's no retry logic --
+  pressing the button again is the current (and, per the user, the
+  actually-correct) mitigation.

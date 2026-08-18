@@ -6,6 +6,24 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.37] - 2026-08-18
+
+- Add target-temperature +/- controls to the control panel's thermostat
+  card (`climate.set_temperature`), after the first live pass turned out
+  to be missing the obvious other control (mode-only). Also fixed a real
+  process gap found the same way: `cigar_dashboard`/`energy_report`/
+  `home_dashboard` hadn't been force-regenerated after `control_panel`
+  was added to `site_shared.nav.PAGES`, so their nav bars and swipe
+  targets were serving a stale 3-page chain until their own cron caught
+  up (fast for the 2-minute-cron pages, not yet for `energy_report`'s
+  2-hour one) -- force-regenerated all three immediately rather than
+  waiting. Blind controls confirmed live by the user through the real
+  page: works correctly, subject to the RF hub's own occasional
+  flakiness (a partial room-wide command, a reported timeout that still
+  landed) -- confirmed as known, pre-existing hardware behavior matching
+  HA's own UI and the native app, not a bug to fix here. 6 new tests;
+  258 across all five packages.
+
 ## [1.0.36] - 2026-08-18
 
 - Add a 4th dashboard page, `control_panel` (`/control/`) -- thermostat

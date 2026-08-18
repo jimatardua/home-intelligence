@@ -19,6 +19,14 @@ CLIMATE_ENTITY = "climate.family_room_family_room"
 HVAC_MODES: list[str] = ["off", "cool", "heat"]
 HVAC_MODE_LABELS: dict[str, str] = {"off": "Off", "cool": "Cool", "heat": "Heat"}
 
+# A sanity guard against obviously-wrong values (e.g. a stray extra digit),
+# not an attempt to enforce the thermostat's real min/max -- HA/the Nest
+# integration itself is the source of truth for that and will reject an
+# out-of-range value on its own, surfaced as a normal HomeAssistantError.
+MIN_TEMPERATURE = 50
+MAX_TEMPERATURE = 90
+TEMPERATURE_STEP = 1
+
 OFFICE_COVERS: list[str] = [
     "cover.office_1",
     "cover.office_2",

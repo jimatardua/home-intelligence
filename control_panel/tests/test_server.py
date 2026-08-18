@@ -82,9 +82,12 @@ def test_set_thermostat_mode_rejects_heat_cool(client):
     mock_call.assert_not_called()
 
 
-def test_set_thermostat_mode_rejects_missing_mode(client):
-    resp = client.post("/control/api/thermostat", json={})
+def test_set_thermostat_rejects_neither_mode_nor_temperature(client):
+    with patch.object(ha_client, "call_service") as mock_call:
+        resp = client.post("/control/api/thermostat", json={})
+
     assert resp.status_code == 400
+    mock_call.assert_not_called()
 
 
 def test_set_thermostat_mode_ha_unreachable_returns_503(client):
@@ -92,6 +95,48 @@ def test_set_thermostat_mode_ha_unreachable_returns_503(client):
         resp = client.post("/control/api/thermostat", json={"mode": "cool"})
 
     assert resp.status_code == 503
+
+
+def test_set_thermostat_temperature_calls_set_temperature(client):
+    with patch.object(ha_client, "call_service") as mock_call:
+        resp = client.post("/control/api/thermostat", json={"temperature": 72})
+
+    assert resp.status_code == 200
+    mock_call.assert_called_once_with("climate", "set_temperature", CLIMATE_ENTITY, temperature=72)
+
+
+def test_set_thermostat_temperature_rejects_out_of_range(client):
+    with patch.object(ha_client, "call_service") as mock_call:
+        resp = client.post("/control/api/thermostat", json={"temperature": 200})
+
+    assert resp.status_code == 400
+    mock_call.assert_not_called()
+
+
+def test_set_thermostat_temperature_rejects_non_numeric(client):
+    with patch.object(ha_client, "call_service") as mock_call:
+        resp = client.post("/control/api/thermostat", json={"temperature": "warm"})
+
+    assert resp.status_code == 400
+    mock_call.assert_not_called()
+
+
+def test_set_thermostat_temperature_rejects_bool_masquerading_as_number(client):
+    # bool is a subclass of int in Python -- isinstance(True, (int, float))
+    # is True, so this needs an explicit guard, not just an isinstance check.
+    with patch.object(ha_client, "call_service") as mock_call:
+        resp = client.post("/control/api/thermostat", json={"temperature": True})
+
+    assert resp.status_code == 400
+    mock_call.assert_not_called()
+
+
+def test_set_thermostat_accepts_mode_and_temperature_together(client):
+    with patch.object(ha_client, "call_service") as mock_call:
+        resp = client.post("/control/api/thermostat", json={"mode": "cool", "temperature": 70})
+
+    assert resp.status_code == 200
+    assert mock_call.call_count == 2
 
 
 # --- POST /control/api/blinds/<room> --------------------------------------

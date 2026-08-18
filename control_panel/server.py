@@ -18,6 +18,8 @@ from control_panel.const import (
     COVER_MID_POSITION,
     COVER_POSITION_SERVICE,
     HVAC_MODES,
+    MAX_TEMPERATURE,
+    MIN_TEMPERATURE,
     ROOM_COVERS,
 )
 
@@ -49,13 +51,38 @@ def get_thermostat():
 
 
 @app.route("/control/api/thermostat", methods=["POST"])
-def set_thermostat_mode():
+def set_thermostat():
+    """Accepts `mode` and/or `temperature` -- the +/- buttons only ever
+    send `temperature`, the mode buttons only ever send `mode`, but
+    either (or both) is valid so a caller isn't forced into two round
+    trips to change both at once."""
     body = request.get_json(silent=True) or {}
     mode = body.get("mode")
-    if mode not in HVAC_MODES:
+    temperature = body.get("temperature")
+
+    if mode is None and temperature is None:
+        return jsonify({"error": "invalid_request", "message": "mode or temperature is required"}), 400
+    if mode is not None and mode not in HVAC_MODES:
         return jsonify({"error": "invalid_request", "message": f"mode must be one of {HVAC_MODES}"}), 400
+    if temperature is not None:
+        if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
+            return jsonify({"error": "invalid_request", "message": "temperature must be a number"}), 400
+        if not (MIN_TEMPERATURE <= temperature <= MAX_TEMPERATURE):
+            return (
+                jsonify(
+                    {
+                        "error": "invalid_request",
+                        "message": f"temperature must be between {MIN_TEMPERATURE} and {MAX_TEMPERATURE}",
+                    }
+                ),
+                400,
+            )
+
     try:
-        ha_client.call_service("climate", "set_hvac_mode", CLIMATE_ENTITY, hvac_mode=mode)
+        if mode is not None:
+            ha_client.call_service("climate", "set_hvac_mode", CLIMATE_ENTITY, hvac_mode=mode)
+        if temperature is not None:
+            ha_client.call_service("climate", "set_temperature", CLIMATE_ENTITY, temperature=temperature)
     except (ha_client.HomeAssistantUnreachable, ha_client.HomeAssistantError) as err:
         return _error_response(err)
     return jsonify({"ok": True})
