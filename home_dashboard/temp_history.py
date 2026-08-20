@@ -15,6 +15,10 @@ from energy_report.ha_recorder import get_current_gated_temperature, get_numeric
 
 OUTDOOR_TEMP_ENTITY = "sensor.eve_weather_20ebs9901_temperature"
 
+# The dashboard sparkline's window -- single source of truth so the query
+# and the on-screen "last Nh" label (render.py) can never drift apart.
+OUTDOOR_TEMP_HISTORY_HOURS = 24
+
 # A second, independent outdoor-temperature source -- see
 # energy_report/generate_report.py's CARPORT_ZONE/CARPORT_SOURCES for the
 # full rationale (north sensor runs warm from patio radiant heat; carport
@@ -36,7 +40,7 @@ class TempPoint:
 
 
 def get_recent_outdoor_temps(
-    conn: sqlite3.Connection, now_local: datetime, hours: int = 12
+    conn: sqlite3.Connection, now_local: datetime, hours: int = OUTDOOR_TEMP_HISTORY_HOURS
 ) -> list[TempPoint]:
     """Outdoor temperature readings from `hours` ago through `now_local`.
 

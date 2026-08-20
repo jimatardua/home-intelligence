@@ -29,7 +29,11 @@ from home_dashboard.render import (
     render_manifest_json,
 )
 from home_dashboard.sun_times import get_sun_times
-from home_dashboard.temp_history import get_current_carport_temp, get_recent_outdoor_temps
+from home_dashboard.temp_history import (
+    OUTDOOR_TEMP_HISTORY_HOURS,
+    get_current_carport_temp,
+    get_recent_outdoor_temps,
+)
 from home_dashboard.usage_today import get_usage_today
 
 OUTDOOR_TEMP_ENTITY = "sensor.eve_weather_20ebs9901_temperature"
@@ -108,7 +112,7 @@ def _build_context(db_path: Path, output_dir: Path) -> DashboardContext:
     outdoor_battery_pct = _float_or_none(get_latest_state(conn, OUTDOOR_BATTERY_ENTITY))
     temp_history = [
         TempHistoryPoint(at_local=p.at_local, temp_f=p.temp_f)
-        for p in get_recent_outdoor_temps(conn, now_local, hours=12)
+        for p in get_recent_outdoor_temps(conn, now_local, hours=OUTDOOR_TEMP_HISTORY_HOURS)
     ]
     carport_temp_f = get_current_carport_temp(conn)
 

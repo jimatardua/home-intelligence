@@ -6,6 +6,13 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.41] - 2026-08-20
+
+- Extend the dashboard's outdoor temperature sparkline from 12h to 24h.
+  `OUTDOOR_TEMP_HISTORY_HOURS` (`home_dashboard/temp_history.py`) is now
+  the single source of truth for the window, used by both the query and
+  the on-screen "last Nh" label so they can't drift apart.
+
 ## [1.0.40] - 2026-08-18
 
 - Add a Family Room speaker card to the control panel: "Relaxing Music"

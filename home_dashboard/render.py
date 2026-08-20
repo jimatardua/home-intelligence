@@ -24,6 +24,7 @@ from site_shared import nav, theme
 from site_shared.theme import DARK as DARK_THEME
 
 from home_dashboard.icons import load_icon_sprite
+from home_dashboard.temp_history import OUTDOOR_TEMP_HISTORY_HOURS
 
 # BG_COLOR is still used directly for manifest.json's
 # background_color/theme_color (which can't consume a CSS var) -- sourced
@@ -397,7 +398,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 </div>
 
 <div class="sparkline-card">
-  <div class="label" id="sparkline-label">Outdoor temp -- last 12h</div>
+  <div class="label" id="sparkline-label">Outdoor temp -- last {OUTDOOR_TEMP_HISTORY_HOURS}h</div>
   <svg id="sparkline-svg" viewBox="0 0 600 100" preserveAspectRatio="none"></svg>
 </div>
 
@@ -421,7 +422,7 @@ function drawSparkline(history) {{
   const label = document.getElementById('sparkline-label');
   if (!history || history.length < 2) {{
     svg.innerHTML = '';
-    label.textContent = 'Outdoor temp -- last 12h (not enough data yet)';
+    label.textContent = 'Outdoor temp -- last {OUTDOOR_TEMP_HISTORY_HOURS}h (not enough data yet)';
     return;
   }}
   const width = 600, height = 100;
@@ -475,7 +476,7 @@ function drawSparkline(history) {{
   }});
 
   svg.innerHTML = svgHtml;
-  label.textContent = 'Outdoor temp -- last 12h';
+  label.textContent = 'Outdoor temp -- last {OUTDOOR_TEMP_HISTORY_HOURS}h';
 }}
 
 function applyData(d) {{

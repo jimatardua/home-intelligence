@@ -99,7 +99,7 @@ RMP's actual meter reading to know.
   `ac_kwh_for_hour()`/`ev_kwh_for_hour()`/`AC_ESTIMATED_KW` directly --
   same math as the TOU report's own disaggregation, just queried live
   against "now" instead of the RMP archive's lagging dates
-- `temp_history.py` -- last-12h outdoor temperature readings for the
+- `temp_history.py` -- last-24h outdoor temperature readings for the
   sparkline, reusing `get_numeric_sensor_samples()` directly (same reader,
   different time window than the current-value read); also
   `get_current_carport_temp()`, the current south-side/carport reading
