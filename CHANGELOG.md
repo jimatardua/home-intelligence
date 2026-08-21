@@ -6,6 +6,23 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.42] - 2026-08-21
+
+- Add backoff to the two weather-upload HA automations (Weathercloud,
+  Weather Underground/PWSWeather) -- after last night's ~10-hour silent
+  outage (see docs/automation-health.md), they now throttle from every
+  5-10 min down to every 30 min (1-6h since last success) and then hourly
+  (6h+), via a per-automation `input_datetime` "last success" helper and a
+  template condition, rather than retrying forever with no backoff.
+- Add `automation_health/`, a new cron-driven package that counts recent
+  HA automation/rest_command ERROR-level log lines (via `docker logs`,
+  since HA's `/api/error_log` 404s on this install) and writes a
+  Prometheus textfile-collector metric
+  (`home_intelligence_automation_upload_errors`) for the infrastructure
+  session's existing Grafana/alerting pipeline. Deliberately never
+  captures log message bodies, since one of the watched rest_commands logs
+  its account password in plaintext on failure.
+
 ## [1.0.41] - 2026-08-20
 
 - Extend the dashboard's outdoor temperature sparkline from 12h to 24h.
