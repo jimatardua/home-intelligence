@@ -35,8 +35,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"automation_health: {err} -- leaving previous metric file untouched", file=sys.stderr)
         return 1
 
-    counts = count_errors_by_automation(lines, dt_module.datetime.now(), args.lookback_minutes)
-    content = render_prometheus_text(counts)
+    now = dt_module.datetime.now()
+    counts = count_errors_by_automation(lines, now, args.lookback_minutes)
+    content = render_prometheus_text(counts, now)
     write_textfile_atomically(content, args.textfile_path)
     print(f"Wrote {args.textfile_path}: {counts}")
     return 0

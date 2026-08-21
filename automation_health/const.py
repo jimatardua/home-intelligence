@@ -38,3 +38,13 @@ REST_COMMAND_LOGGER = "homeassistant.components.rest_command"
 REST_COMMAND_LABEL = "rest_command"
 
 METRIC_NAME = "home_intelligence_automation_upload_errors"
+
+# A metric that only reports counts reads as "0 errors, all healthy" if the
+# collector itself silently stops running -- this tracks when collect.py
+# last *actually completed* a collection (docker logs fetch + parse +
+# write all succeeded), so staleness (the cron job died, docker logs kept
+# failing, etc.) can be alerted on independently of the error counts
+# themselves. Flagged by the infrastructure session after wiring up the
+# Grafana alert -- same failure shape they'd separately hit with a
+# speedtest metric that week.
+COLLECTION_TIMESTAMP_METRIC_NAME = "home_intelligence_automation_upload_collection_timestamp_seconds"

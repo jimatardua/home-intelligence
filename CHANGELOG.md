@@ -6,6 +6,17 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.43] - 2026-08-21
+
+- Add `home_intelligence_automation_upload_collection_timestamp_seconds` to
+  `automation_health` -- a unix timestamp updated only on a fully
+  successful collection, so Grafana can alert on the collector itself
+  going stale (cron dying, `docker logs` failing repeatedly) independently
+  of the error-count metric, which would otherwise read as "0 errors, all
+  healthy" in exactly that case. Suggested by the infrastructure session
+  after wiring up the Grafana alert for the error-count metric, having hit
+  the same failure shape with a speedtest metric that week.
+
 ## [1.0.42] - 2026-08-21
 
 - Add backoff to the two weather-upload HA automations (Weathercloud,

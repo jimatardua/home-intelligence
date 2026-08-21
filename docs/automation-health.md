@@ -116,6 +116,16 @@ watched automations' -- it's a genuinely different, useful signal (catches
 future/unwatched rest_commands too), not an "other" bucket meant to be
 mutually exclusive with the watched-automation counts.
 
+**Staleness metric, added after the infrastructure session wired up the
+Grafana alert**: a count-only metric reads as "0 errors, all healthy" if
+the collector itself silently stops running (cron dies, `docker logs`
+keeps failing, etc.) -- identical to genuinely healthy from Prometheus's
+point of view. `home_intelligence_automation_upload_collection_timestamp_seconds`
+is a unix timestamp, updated only on a fully successful collection (fetch +
+parse + write all succeeded), so staleness can be alerted on independently
+of the error counts. Same failure shape the infra session had separately
+hit with a speedtest metric that week.
+
 ### Architecture
 
 ```

@@ -10,11 +10,12 @@ loosening the directory's own ownership.
 
 from __future__ import annotations
 
+from datetime import datetime
 import os
 import subprocess
 import tempfile
 
-from automation_health.const import METRIC_NAME, TEXTFILE_GROUP, TEXTFILE_OWNER
+from automation_health.const import COLLECTION_TIMESTAMP_METRIC_NAME, METRIC_NAME, TEXTFILE_GROUP, TEXTFILE_OWNER
 
 _HELP = (
     f"# HELP {METRIC_NAME} Count of ERROR-level Home Assistant log lines "
@@ -23,11 +24,21 @@ _HELP = (
 )
 _TYPE = f"# TYPE {METRIC_NAME} gauge"
 
+_COLLECTION_HELP = (
+    f"# HELP {COLLECTION_TIMESTAMP_METRIC_NAME} Unix timestamp of the last "
+    "time this exporter successfully completed a collection. Use for "
+    "staleness alerting -- if this stops advancing, automation_health has "
+    "stopped checking, which reads identically to \"all clear\" in the "
+    "error-count metric alone."
+)
+_COLLECTION_TYPE = f"# TYPE {COLLECTION_TIMESTAMP_METRIC_NAME} gauge"
 
-def render_prometheus_text(counts: dict[str, int]) -> str:
+
+def render_prometheus_text(counts: dict[str, int], collected_at: datetime) -> str:
     lines = [_HELP, _TYPE]
     for label, count in counts.items():
         lines.append(f'{METRIC_NAME}{{automation="{label}"}} {count}')
+    lines += [_COLLECTION_HELP, _COLLECTION_TYPE, f"{COLLECTION_TIMESTAMP_METRIC_NAME} {collected_at.timestamp()}"]
     return "\n".join(lines) + "\n"
 
 
