@@ -6,6 +6,16 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.46] - 2026-08-22
+
+- Docs only: record the infra-side resolution of the flapping-alert
+  incident (Grafana switched to `count >= 6 sustained 10m`; `popcorn` was
+  a real leftover duplicate Prometheus scrape target from before domus's
+  rename, not just a labeling quirk -- removed; the DNS-flakiness lead
+  narrowed to the Docker/hassio bridge path specifically, confirmed via
+  clean `hassio_dns`/Unbound logs at the exact blip timestamps). See
+  docs/automation-health.md's "Flapping alert" -> "Resolution".
+
 ## [1.0.45] - 2026-08-22
 
 - Fix the `home_intelligence_automation_upload_errors` alert flapping

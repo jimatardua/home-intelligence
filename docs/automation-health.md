@@ -225,6 +225,28 @@ label per window, worst coincidental double-blip = 6, the original
 the domus/popcorn double-counting as worth deduping at the scrape-config
 level, separately from the alerting-logic fix.
 
+**Resolution, confirmed by infra (commit `b2a0c23`)**:
+- Grafana alert switched to `count >= 6 sustained 10m`, deployed.
+- `popcorn` was a real bug on their side, not just a labeling quirk --
+  domus's pre-rename hostname, deliberately kept alive in DNS ("legacy
+  name," intentional), but it also still had its own standalone
+  Prometheus scrape target left over from before the rename that was
+  never cleaned up. Every metric and every alert had been silently
+  double-counted/double-paged since whenever that stale target was added
+  -- not specific to this metric. Duplicate target removed.
+- The DNS-flakiness lead got a real, narrower answer, not just a
+  reproduction of the original finding: infra checked pfSense's Unbound
+  resolver log and `hassio_dns`'s own logs at the exact blip timestamps --
+  both clean, and critically, the DNS query *never reaches `hassio_dns`
+  at all* during a blip. So it's confirmed to be inside the Docker/hassio
+  bridge path specifically (same general area the original 10-hour outage
+  was narrowed to), not a DNS server problem, not upstream of the Pi --
+  just intermittent now instead of sustained. Not pursued further from
+  the infra side (kernel/iptables/conntrack territory, outside what's
+  efficient to investigate from there) -- left here as a real, specific
+  lead if this ever becomes worth chasing down properly, rather than
+  something actively being worked.
+
 ## Not in scope
 
 - **`automation.upload_eve_weather_readings_to_weather_underground`** --
@@ -235,11 +257,8 @@ level, separately from the alerting-logic fix.
 - **The WU/PWSWeather plaintext-password-in-logs issue** described above --
   worth fixing on HA's side at some point, but a separate concern from
   either the outage or these two fixes.
-- **The Grafana alert rule's exact threshold/condition** -- explicitly the
-  infrastructure session's side to change; a count-based threshold was
-  recommended (see "Flapping alert" above) as defense in depth, but the
-  primary fix (the exporter's delta window) already shipped from this
-  side and doesn't depend on that recommendation being taken.
-- **Deduping domus/popcorn as the same machine at the Prometheus
-  scrape-config level** -- flagged to infra, not this project's config to
-  change.
+- **The intermittent Docker/hassio bridge DNS issue** (see "Flapping
+  alert" -> "Resolution" above) -- confirmed real and specifically
+  localized (query never reaches `hassio_dns`), but not pursued further;
+  kernel/iptables/conntrack-level investigation, worth prioritizing only
+  if it starts happening more often or for longer.
