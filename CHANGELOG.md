@@ -6,6 +6,21 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.48] - 2026-08-22
+
+- Add reboot escalation to `ble_auto_reset.py` -- after
+  `REBOOT_AFTER_CONSECUTIVE_FAILURES` (3) failed `hciconfig`-based resets,
+  the next action escalates to `sudo reboot` (local, same passwordless
+  sudo `ble_nightly_reset.sh` already uses). If the collector is still
+  unhealthy `REBOOT_GRACE_PERIOD_MINUTES` (10) after that reboot, the
+  script gives up with a clear error rather than rebooting repeatedly
+  forever -- the user's explicit call, since a reboot that doesn't fix it
+  means an actual hardware fault, not the known transient lockup class.
+  8 new tests (41 total for this module) cover every state transition;
+  deployed and confirmed live against the real healthy system (no
+  unintended reboot). See docs/govee-cigar-monitor.md's "Reboot
+  escalation" section.
+
 ## [1.0.47] - 2026-08-22
 
 - Fix two real bugs in `ble_auto_reset.py` found after a crash-looping

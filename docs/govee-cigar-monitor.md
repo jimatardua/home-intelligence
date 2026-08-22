@@ -381,6 +381,50 @@ Deployed and confirmed live: ran the fixed script by hand against the
 now-healthy (post-reboot) collector -- correctly identified no health
 line + service active as healthy, made no unnecessary state-file writes.
 
+## Reboot escalation
+
+The 2026-08-22 incident's *actual* root cause -- a kernel-level HCI
+lockup -- can't be fixed by `hciconfig`/`bluetoothd` at all (confirmed
+live: a manual retry of the exact same commands failed identically).
+Only a full reboot cleared it. `ble_auto_reset.py` now escalates to one
+automatically: after `REBOOT_AFTER_CONSECUTIVE_FAILURES` (3) failed
+`hciconfig`-based resets -- still gated by the existing tiered backoff,
+so this is the *fourth* remediation attempt overall, roughly 80 minutes
+into an incident -- the next action is `sudo reboot`, run locally (this
+script already executes on mrteeny via its own cron with the same
+passwordless sudo `ble_nightly_reset.sh` uses; no SSH involved, unlike
+the separate permission granted for this session's own interactive use).
+
+**Give-up condition, the user's explicit call**: if the collector is
+still unhealthy `REBOOT_GRACE_PERIOD_MINUTES` (10) after that reboot, the
+script gives up entirely -- sets a sticky `gave_up` flag, prints an error,
+exits 1, and takes no further remediation action on any subsequent run
+while still unhealthy. Reasoning: a reboot that doesn't fix it means
+something is actually broken (hardware fault, not the known transient
+lockup class), and rebooting repeatedly forever wouldn't help -- it needs
+a human. `gave_up` (and `rebooted_at`, and the failure counter) all clear
+back to fresh state the moment health is next genuinely observed, so a
+future, unrelated incident starts clean rather than inheriting a stale
+give-up from a previous one.
+
+State schema (`govee_collector/auto_reset_state.json`, gitignored --
+runtime state, not config): `last_reset_at`, `consecutive_failed_resets`,
+`rebooted_at`, `gave_up`. `load_state()` fills in `rebooted_at`/`gave_up`
+with their defaults when reading a state file written by the pre-escalation
+version of this script, so no migration step was needed.
+
+Not live-tested end to end (deliberately -- that would mean forcing a
+real, extended BLE outage and a real reboot for no operational benefit,
+given the mechanism itself -- `sudo reboot` with mrteeny's existing
+passwordless sudo -- is the same one already used manually and by the
+nightly script). Instead: 8 new unit tests cover every state transition
+precisely (escalates at the right failure count, waits out the full grace
+period, gives up exactly at the boundary, stays given-up on subsequent
+runs without re-checking timing, recovery clears all incident state, not
+just the failure counter) -- 41 tests total for this module, 371 project-
+wide. Deployed and confirmed live against the actual healthy system: ran
+by hand, correctly took no action and did not reboot.
+
 ## Known risks / things to watch
 
 - **The `govee-collector` MQTT login has full, unscoped broker access**,
@@ -423,22 +467,22 @@ line + service active as healthy, made no unnecessary state-file writes.
   achieves the same outcome without widening the collector process's own
   privileges.
 - **A fourth wedge (2026-08-22) was a different, worse failure class**
-  that neither reset script can actually fix -- a kernel-level HCI
-  lockup (see "2026-08-22" above), below where `hciconfig`/`bluetoothd`
-  operate. `ble_auto_reset.py` now correctly *detects* this class too
-  (Bug 1/2 fixes above), but its only remediation is still the same
-  `hciconfig`/`bluetoothd`-based reset -- which cannot clear a kernel-level
-  lockup, confirmed live (a manual retry of the exact same commands failed
-  identically). Only a full reboot cleared it. **Not yet wired into the
-  automated path** -- today, a kernel-level lockup still means
-  `ble_auto_reset.py` will keep retrying on its normal backoff schedule
-  (5min/15min/hourly) without ever actually succeeding, until a human
-  reboots mrteeny manually. The user has granted standing permission for
-  this session to reboot mrteeny.ardua.lan directly when needed (not
-  wired into `ble_auto_reset.py` itself); whether to add reboot as a
-  further escalation tier in the automated script -- e.g. after N
-  consecutive failed `hciconfig`-based resets -- is an open question, not
-  yet decided.
+  that `hciconfig`/`bluetoothd` alone can't fix -- a kernel-level HCI
+  lockup (see "2026-08-22" above), confirmed live (a manual retry of the
+  exact same reset commands failed identically). `ble_auto_reset.py` now
+  handles this end to end: detects it (Bug 1/2 fixes above), escalates to
+  a full reboot after repeated `hciconfig`-based resets fail, and gives up
+  with a clear error if the reboot itself doesn't fix it within 10 minutes
+  -- see "Reboot escalation" above. The user separately granted this
+  session standing permission to reboot mrteeny.ardua.lan directly for
+  interactive diagnosis; that's unrelated to (and not required by) the
+  automated script, which already has its own local passwordless sudo.
+- **The reboot escalation is not yet live-tested end to end** (deliberately
+  -- see "Reboot escalation" above for why) -- the individual pieces (the
+  reboot mechanism itself, the detection logic, the timing/backoff state
+  machine) are each independently confirmed, live or via the real captured
+  incident data, but a real kernel-level lockup recurring naturally hasn't
+  yet exercised the full escalate-then-give-up path in production.
 
 ## Status
 
@@ -498,9 +542,12 @@ line + service active as healthy, made no unnecessary state-file writes.
       logs an explicit "ok" line either. `service_is_active()` adds
       `systemctl is-active` as a second, independent signal to
       disambiguate. See "2026-08-22: crash-loop went undetected" above.
-      Kernel-level HCI lockups (this incident's actual root cause) are
-      now correctly *detected* but still need a manual reboot to actually
-      *fix* -- not yet automated.
+- [x] Reboot escalation (41 tests passing for `ble_auto_reset.py`, 371
+      project-wide) -- after repeated `hciconfig`-based resets fail,
+      escalates to `sudo reboot` (local, same passwordless sudo the
+      nightly script already uses); gives up with a clear error if still
+      broken 10 minutes after that reboot, rather than rebooting
+      repeatedly forever. See "Reboot escalation" above.
 - [x] Swipe-to-navigate between the three pages (`nav.render_swipe_nav_script`
       in `site_shared`). Full writeup in `docs/site-shared.md`. Confirmed
       live on a real iPad, both directions.

@@ -123,10 +123,13 @@ def test_should_reset_true_when_never_reset_before():
 # --- load_state ----------------------------------------------------------
 
 
+FRESH_STATE = {"last_reset_at": None, "consecutive_failed_resets": 0, "rebooted_at": None, "gave_up": False}
+
+
 def test_load_state_returns_fresh_state_when_file_missing(tmp_path):
     state = load_state(tmp_path / "does_not_exist.json")
 
-    assert state == {"last_reset_at": None, "consecutive_failed_resets": 0}
+    assert state == FRESH_STATE
 
 
 def test_load_state_returns_fresh_state_when_file_corrupt(tmp_path):
@@ -135,16 +138,34 @@ def test_load_state_returns_fresh_state_when_file_corrupt(tmp_path):
 
     state = load_state(path)
 
-    assert state == {"last_reset_at": None, "consecutive_failed_resets": 0}
+    assert state == FRESH_STATE
 
 
 def test_load_state_round_trips(tmp_path):
     from govee_collector.ble_auto_reset import save_state
 
     path = tmp_path / "state.json"
-    save_state(path, {"last_reset_at": "2026-08-21T16:00:00", "consecutive_failed_resets": 2})
+    full_state = {
+        "last_reset_at": "2026-08-21T16:00:00",
+        "consecutive_failed_resets": 2,
+        "rebooted_at": "2026-08-22T17:00:00",
+        "gave_up": False,
+    }
+    save_state(path, full_state)
 
-    assert load_state(path) == {"last_reset_at": "2026-08-21T16:00:00", "consecutive_failed_resets": 2}
+    assert load_state(path) == full_state
+
+
+def test_load_state_fills_in_missing_reboot_fields_for_backward_compatibility(tmp_path):
+    # A state file written by the pre-reboot-escalation version of this
+    # script won't have rebooted_at/gave_up at all.
+    path = tmp_path / "old_state.json"
+    path.write_text(json.dumps({"last_reset_at": "2026-08-21T16:00:00", "consecutive_failed_resets": 1}))
+
+    state = load_state(path)
+
+    assert state["rebooted_at"] is None
+    assert state["gave_up"] is False
 
 
 # --- fetch_recent_health_lines -------------------------------------------
@@ -272,3 +293,159 @@ def test_main_returns_1_and_leaves_state_untouched_on_journal_failure(tmp_path, 
     assert rc == 1
     assert "no journal" in capsys.readouterr().err
     assert json.loads(state_path.read_text())["consecutive_failed_resets"] == 0
+
+
+# --- reboot escalation (2026-08-22 incident #2: hciconfig alone can't fix
+# a kernel-level lockup; only a reboot did, live) -------------------------
+
+
+def test_main_reboots_after_enough_failed_resets(tmp_path):
+    from govee_collector.ble_auto_reset import REBOOT_AFTER_CONSECUTIVE_FAILURES
+
+    state_path = tmp_path / "state.json"
+    long_ago = (datetime.now() - timedelta(hours=2)).isoformat()
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_reset_at": long_ago,
+                "consecutive_failed_resets": REBOOT_AFTER_CONSECUTIVE_FAILURES,
+                "rebooted_at": None,
+                "gave_up": False,
+            }
+        )
+    )
+
+    rc, mock_run = _run_main(state_path, [STUCK_LINE], service_active=True)
+
+    assert rc == 0
+    mock_run.assert_called_once_with(["sudo", "reboot"], check=False)
+
+    saved = json.loads(state_path.read_text())
+    assert saved["rebooted_at"] is not None
+    # Not touched by the reboot branch -- last_reset_at still reflects the
+    # last hciconfig-based attempt, not the reboot.
+    assert saved["last_reset_at"] == long_ago
+
+
+def test_main_does_not_reboot_before_enough_failed_resets(tmp_path):
+    from govee_collector.ble_auto_reset import REBOOT_AFTER_CONSECUTIVE_FAILURES
+
+    state_path = tmp_path / "state.json"
+    long_ago = (datetime.now() - timedelta(hours=2)).isoformat()
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_reset_at": long_ago,
+                "consecutive_failed_resets": REBOOT_AFTER_CONSECUTIVE_FAILURES - 1,
+                "rebooted_at": None,
+                "gave_up": False,
+            }
+        )
+    )
+
+    rc, mock_run = _run_main(state_path, [STUCK_LINE], service_active=True)
+
+    mock_run.assert_called_once()
+    args = mock_run.call_args[0][0]
+    assert args[0].endswith("ble_nightly_reset.sh")  # still the plain reset, not a reboot yet
+
+
+def test_main_waits_within_the_post_reboot_grace_period(tmp_path):
+    state_path = tmp_path / "state.json"
+    recent_reboot = (datetime.now() - timedelta(minutes=3)).isoformat()
+    state_path.write_text(
+        json.dumps(
+            {"last_reset_at": None, "consecutive_failed_resets": 3, "rebooted_at": recent_reboot, "gave_up": False}
+        )
+    )
+
+    rc, mock_run = _run_main(state_path, [STUCK_LINE], service_active=True)
+
+    assert rc == 0
+    mock_run.assert_not_called()
+    saved = json.loads(state_path.read_text())
+    assert saved["gave_up"] is False
+    assert saved["rebooted_at"] == recent_reboot
+
+
+def test_main_gives_up_when_still_broken_past_the_grace_period(tmp_path, capsys):
+    from govee_collector.ble_auto_reset import REBOOT_GRACE_PERIOD_MINUTES
+
+    state_path = tmp_path / "state.json"
+    old_reboot = (datetime.now() - timedelta(minutes=REBOOT_GRACE_PERIOD_MINUTES + 1)).isoformat()
+    state_path.write_text(
+        json.dumps(
+            {"last_reset_at": None, "consecutive_failed_resets": 3, "rebooted_at": old_reboot, "gave_up": False}
+        )
+    )
+
+    rc, mock_run = _run_main(state_path, [STUCK_LINE], service_active=True)
+
+    assert rc == 1
+    mock_run.assert_not_called()  # no further action taken -- just gives up
+    assert "giving up" in capsys.readouterr().err.lower()
+    assert json.loads(state_path.read_text())["gave_up"] is True
+
+
+def test_main_gives_up_exactly_at_the_grace_period_boundary(tmp_path):
+    from govee_collector.ble_auto_reset import REBOOT_GRACE_PERIOD_MINUTES
+
+    state_path = tmp_path / "state.json"
+    exactly_at_boundary = (datetime.now() - timedelta(minutes=REBOOT_GRACE_PERIOD_MINUTES)).isoformat()
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_reset_at": None,
+                "consecutive_failed_resets": 3,
+                "rebooted_at": exactly_at_boundary,
+                "gave_up": False,
+            }
+        )
+    )
+
+    rc, mock_run = _run_main(state_path, [STUCK_LINE], service_active=True)
+
+    assert rc == 1
+    assert json.loads(state_path.read_text())["gave_up"] is True
+
+
+def test_main_stays_given_up_on_subsequent_runs_without_rechecking_timing(tmp_path, capsys):
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_reset_at": None,
+                "consecutive_failed_resets": 3,
+                "rebooted_at": datetime.now().isoformat(),  # recent -- would normally still be in grace period
+                "gave_up": True,
+            }
+        )
+    )
+
+    rc, mock_run = _run_main(state_path, [STUCK_LINE], service_active=True)
+
+    assert rc == 1
+    mock_run.assert_not_called()
+
+
+def test_main_recovery_clears_reboot_and_give_up_state_too(tmp_path):
+    # Recovery must reset the *entire* incident's state, not just the
+    # hciconfig-based failure count -- otherwise a fresh future incident
+    # would inherit a stale gave_up=True and never even attempt a reset.
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_reset_at": "2026-08-22T15:00:00",
+                "consecutive_failed_resets": 3,
+                "rebooted_at": "2026-08-22T16:00:00",
+                "gave_up": True,
+            }
+        )
+    )
+
+    rc, mock_run = _run_main(state_path, [], service_active=True)  # no health line + active = healthy
+
+    assert rc == 0
+    mock_run.assert_not_called()
+    assert json.loads(state_path.read_text()) == FRESH_STATE

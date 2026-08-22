@@ -37,6 +37,22 @@ state should read as 'go check,' not 'everything's fine'" convention
 already used elsewhere in this project (see
 `cigar_dashboard/govee_history.py`'s `get_collector_health()`), just
 applied with a real second signal instead of guessing.
+
+Reboot escalation, added after that same incident's actual root cause
+turned out to be a kernel-level HCI lockup (dmesg: "command tx timeout",
+even a plain HCI Reset failing) -- below where `hciconfig`/`bluetoothd`
+operate, confirmed live: the reset script's own `hciconfig hci0 up` fails
+identically on retry. `hciconfig`-based resets alone can't fix that
+class of failure; only a reboot did, live. After
+REBOOT_AFTER_CONSECUTIVE_FAILURES failed `hciconfig`-based attempts, the
+next action escalates to `sudo reboot` (run locally -- this script
+already executes on mrteeny via its own cron, with the same passwordless
+sudo `ble_nightly_reset.sh` already uses, so no SSH involved). If the
+problem is still present REBOOT_GRACE_PERIOD_MINUTES after that reboot,
+this gives up entirely (a `gave_up` flag, sticky until genuine recovery)
+rather than rebooting repeatedly forever -- a reboot that doesn't fix it
+means something is actually wrong with the hardware, not something more
+retrying will solve, and needs a human.
 """
 
 from __future__ import annotations
@@ -65,6 +81,16 @@ STUCK = "stuck"
 # known transient wedge is going on). Index = consecutive_failed_resets,
 # capped at the last entry for anything beyond.
 BACKOFF_MINUTES = [0, 5, 15, 60]
+
+# After this many failed hciconfig-based resets (still gated by the
+# backoff above), escalate to a full reboot instead of trying hciconfig
+# again -- 3 patient software-level retries, then the hardware-level fix.
+REBOOT_AFTER_CONSECUTIVE_FAILURES = 3
+
+# How long to wait after a reboot before judging whether it worked. User's
+# explicit call: still broken this long after a reboot means something is
+# actually wrong, not something more waiting will fix.
+REBOOT_GRACE_PERIOD_MINUTES = 10
 
 # journalctl prepends its own "Aug 21 15:39:02 mrteeny python3[449716]: "
 # prefix before the app's own line -- "2026-08-21 15:39:02,568 WARNING
@@ -127,15 +153,28 @@ def current_status(lines: list[str]) -> str | None:
     return latest[1] if latest else None
 
 
+def _fresh_state() -> dict:
+    return {
+        "last_reset_at": None,
+        "consecutive_failed_resets": 0,
+        "rebooted_at": None,
+        "gave_up": False,
+    }
+
+
 def load_state(path: Path) -> dict:
     try:
         with open(path) as f:
             data = json.load(f)
-        return {"last_reset_at": data.get("last_reset_at"), "consecutive_failed_resets": data.get("consecutive_failed_resets", 0)}
+        # data.get(key, default) rather than data directly -- forward
+        # compatible with a state file written before rebooted_at/gave_up
+        # existed, filling them in rather than KeyError-ing later.
+        fresh = _fresh_state()
+        return {key: data.get(key, fresh[key]) for key in fresh}
     except (OSError, json.JSONDecodeError):
         # Missing or corrupt -- treat as fresh state rather than crashing,
         # same gap-handling convention used throughout this project.
-        return {"last_reset_at": None, "consecutive_failed_resets": 0}
+        return _fresh_state()
 
 
 def save_state(path: Path, state: dict) -> None:
@@ -184,23 +223,53 @@ def main(argv: list[str] | None = None) -> int:
         # report anything." Disambiguate with a second, independent
         # signal -- is the process actually running right now?
         if service_is_active(SYSTEMD_UNIT):
-            if state["consecutive_failed_resets"] != 0:
-                state["consecutive_failed_resets"] = 0
+            if state["consecutive_failed_resets"] != 0 or state["rebooted_at"] is not None or state["gave_up"]:
+                state = _fresh_state()
                 save_state(args.state_path, state)
-                print("No health line, but the service is genuinely active -- clearing failed-reset count")
+                print("No health line, but the service is genuinely active -- clearing all recovery state")
             return 0
         reason = "no health signal at all, and the service is not active (crash loop)"
     else:
         reason = "stuck"
 
-    # status is "stuck", or None-and-not-actually-running.
+    # status is "stuck", or None-and-not-actually-running -- genuinely
+    # needs remediation.
+    if state["gave_up"]:
+        print("ble_auto_reset: still broken after a reboot didn't fix it -- gave up, needs manual attention", file=sys.stderr)
+        return 1
+
+    if state["rebooted_at"] is not None:
+        elapsed_since_reboot = now - datetime.fromisoformat(state["rebooted_at"])
+        if elapsed_since_reboot < timedelta(minutes=REBOOT_GRACE_PERIOD_MINUTES):
+            return 0  # still within the grace period -- give the reboot time to prove itself
+        state["gave_up"] = True
+        save_state(args.state_path, state)
+        print(
+            f"ble_auto_reset: collector health: {reason} -- still broken "
+            f"{REBOOT_GRACE_PERIOD_MINUTES}+ minutes after a reboot -- giving up, needs manual attention",
+            file=sys.stderr,
+        )
+        return 1
+
     if not should_reset(state, now):
+        return 0
+
+    if state["consecutive_failed_resets"] >= REBOOT_AFTER_CONSECUTIVE_FAILURES:
+        # hciconfig-based resets have been tried enough times -- escalate
+        # to a full reboot (local `sudo reboot`, same passwordless sudo
+        # ble_nightly_reset.sh already uses; no SSH, this script already
+        # runs on mrteeny). Save state before issuing it -- the reboot
+        # itself will cut this process off shortly after.
+        print(f"Collector health: {reason} -- {state['consecutive_failed_resets']} failed resets, rebooting")
+        state["rebooted_at"] = now.isoformat()
+        save_state(args.state_path, state)
+        subprocess.run(["sudo", "reboot"], check=False)
         return 0
 
     print(f"Collector health: {reason} -- running ble_nightly_reset.sh")
     subprocess.run([str(RESET_SCRIPT)], check=False)
     state["last_reset_at"] = now.isoformat()
-    state["consecutive_failed_resets"] = state.get("consecutive_failed_resets", 0) + 1
+    state["consecutive_failed_resets"] += 1
     save_state(args.state_path, state)
     return 0
 
