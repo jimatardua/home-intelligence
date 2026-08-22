@@ -6,3 +6,4 @@ __pycache__/
 .build/
 rmp/poc_output.txt
 rmp/poc_encrypted_output.txt
+govee_collector/auto_reset_state.json

@@ -289,6 +289,42 @@ Smoke-tested live by running the script directly: adapter reset cleanly,
 `govee-collector` and `bluetooth` both came back `active`, fresh
 advertisements confirmed flowing within seconds.
 
+## On-detection BLE auto-reset
+
+The nightly reset only covers overnight -- `hci0` wedged a third time on
+2026-08-21, mid-afternoon, and the cigar dashboard's red banner sat
+visible until a human noticed and SSH'd in to run the same manual fix.
+`govee_collector/ble_auto_reset.py` closes that gap: cron'd every 2
+minutes on mrteeny, it parses this host's own `journalctl -u
+govee-collector` for `collector.py`'s own `"Collector health: stuck"` log
+line (reusing the collector's already-tuned stale/stuck thresholds --
+`STALE_RESTART_THRESHOLD_SECONDS`, `STUCK_AFTER_CONSECUTIVE_FAILURES` --
+rather than re-deriving them) and, if stuck, runs
+`ble_nightly_reset.sh` -- the identical, already-proven reset sequence,
+called directly rather than duplicated.
+
+Deliberately entirely local to mrteeny -- no dependency on domus, Home
+Assistant, or the MQTT broker being reachable, since this project
+separately hit a ~10-hour cross-host connectivity outage that week (see
+docs/automation-health.md); a detector that depended on the same kind of
+remote reachability to notice a *local* hardware wedge would be a bad bet.
+
+If a reset doesn't actually clear the stuck state, retrying
+`hciconfig`/`systemctl restart bluetooth` every 2 minutes forever isn't
+right -- excessive bluetoothd restarts, and persistent failure means
+something worse than the known transient wedge. A small state file
+(`govee_collector/auto_reset_state.json`, gitignored -- it's runtime
+state, not config) tracks `consecutive_failed_resets` and backs off the
+retry interval the same tiered way `automation_health`'s weather-upload
+automations do: immediate, then 5min, then 15min, then capped at hourly.
+The count clears back to 0 the moment health is next observed as anything
+other than "stuck" -- proof a reset (or a self-recovery) actually worked.
+
+Verified against the real captured log lines from the 2026-08-21 incident
+(15:38-15:40, the exact window a human manually reset it in) --
+`current_status()`/`should_reset()` correctly identify that window as
+needing an immediate reset attempt.
+
 ## Known risks / things to watch
 
 - **The `govee-collector` MQTT login has full, unscoped broker access**,
@@ -315,17 +351,21 @@ advertisements confirmed flowing within seconds.
 - **The watchdog can't recover from a genuinely stuck BlueZ adapter**
   (`org.bluez.Error.InProgress`) on its own -- that needed a manual
   `hciconfig hci0 down`/`up` + `bluetooth` service restart, live, on
-  2026-08-10 and again on 2026-08-14 (see "Real findings"), both times
-  with no contending process -- BlueZ itself appears to periodically wedge
-  independent of anything this project controls. That's now a recurring,
-  not one-off, annoyance, so `govee_collector/ble_nightly_reset.sh`
-  (deployed, cron'd nightly at 4am America/Denver -- see "Preemptive
-  nightly BLE reset" below) runs the same fix proactively rather than
-  waiting for the watchdog to detect and exhaust retries. Giving the
-  collector enough privilege to do this itself (root, or `CAP_NET_ADMIN`)
-  was still deliberately not done -- the nightly cron job (via passwordless
-  `sudo` scoped to `hciconfig`/`systemctl`) achieves the same outcome
-  without widening the collector process's own privileges.
+  2026-08-10, 2026-08-14, and again 2026-08-21 (see "Real findings"), all
+  three times with no contending process -- BlueZ itself appears to
+  periodically wedge independent of anything this project controls.
+  That's a recurring, not one-off, annoyance, so two layers now cover it:
+  `govee_collector/ble_nightly_reset.sh` (nightly at 4am, before the
+  watchdog would ever need to notice) and `ble_auto_reset.py` (every 2
+  minutes, on-detection, for a wedge any other time of day -- see "On-
+  detection BLE auto-reset" above; 2026-08-21's wedge happened mid-
+  afternoon and sat visible on the dashboard until manually noticed,
+  which is exactly the gap that layer closes). Giving the collector
+  enough privilege to do this itself (root, or `CAP_NET_ADMIN`) was still
+  deliberately not done -- passwordless `sudo` scoped to
+  `hciconfig`/`systemctl`, used only by these two dedicated scripts,
+  achieves the same outcome without widening the collector process's own
+  privileges.
 
 ## Status
 
@@ -371,6 +411,13 @@ advertisements confirmed flowing within seconds.
       cron'd 4am America/Denver on mrteeny) -- added after the BlueZ
       wedge recurred a second time (2026-08-10, 2026-08-14). See
       "Preemptive nightly BLE reset" above.
+- [x] On-detection BLE auto-reset (`ble_auto_reset.py`, 26 tests passing,
+      cron'd every 2 minutes on mrteeny) -- added after the wedge recurred
+      a third time (2026-08-21), mid-afternoon, outside the nightly
+      window. Entirely local to mrteeny (parses `journalctl`, no
+      dependency on domus/HA/MQTT reachability), tiered backoff if a
+      reset doesn't actually clear it. See "On-detection BLE auto-reset"
+      above.
 - [x] Swipe-to-navigate between the three pages (`nav.render_swipe_nav_script`
       in `site_shared`). Full writeup in `docs/site-shared.md`. Confirmed
       live on a real iPad, both directions.

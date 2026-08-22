@@ -6,6 +6,17 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.44] - 2026-08-21
+
+- Add `govee_collector/ble_auto_reset.py` -- detects `collector.py`'s own
+  "stuck" BLE health status (parsed from local `journalctl`, no dependency
+  on domus/HA/MQTT reachability) and runs the existing
+  `ble_nightly_reset.sh` automatically, with the same tiered backoff shape
+  built for `automation_health`'s weather-upload automations if a reset
+  doesn't actually clear it. Closes the gap the nightly-only reset left:
+  the BlueZ adapter wedged a third time today, mid-afternoon, and needed a
+  manual SSH-in to notice and fix.
+
 ## [1.0.43] - 2026-08-21
 
 - Add `home_intelligence_automation_upload_collection_timestamp_seconds` to
