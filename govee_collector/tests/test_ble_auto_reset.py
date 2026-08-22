@@ -1,5 +1,6 @@
-"""Fixtures below are the real journalctl output captured during today's
-(2026-08-21) live BLE wedge -- see docs/govee-cigar-monitor.md."""
+"""Fixtures below are real journalctl output -- STUCK_LINE/STALE_LINE from
+the 2026-08-21 wedge, the crash-loop scenario from the 2026-08-22 incident
+(see docs/govee-cigar-monitor.md for both)."""
 
 from __future__ import annotations
 
@@ -16,28 +17,36 @@ from govee_collector.ble_auto_reset import (
     fetch_recent_health_lines,
     load_state,
     main,
+    service_is_active,
     should_reset,
 )
 
 STUCK_LINE = "Aug 21 15:39:02 mrteeny python3[449716]: 2026-08-21 15:39:02,568 WARNING Collector health: stuck"
 STUCK_LINE_LATER = "Aug 21 15:39:47 mrteeny python3[449716]: 2026-08-21 15:39:47,623 WARNING Collector health: stuck"
-OK_LINE = "Aug 21 15:40:10 mrteeny python3[482758]: 2026-08-21 15:40:10,700 INFO Collector health: ok"
+STALE_LINE = "Aug 21 15:36:17 mrteeny python3[449716]: 2026-08-21 15:36:17,201 WARNING Collector health: stale"
 UNRELATED_LINE = "Aug 21 15:40:10 mrteeny python3[482758]: 2026-08-21 15:40:10,822 INFO Connected to MQTT broker"
 
 
-# --- current_status ---------------------------------------------------
+def _completed(returncode=0, stdout="", stderr=""):
+    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+# --- current_status (generic line-parsing, independent of what collector.py
+# actually produces in practice) -----------------------------------------
 
 
 def test_current_status_returns_stuck_from_real_captured_lines():
     assert current_status([STUCK_LINE]) == "stuck"
 
 
+def test_current_status_returns_stale():
+    assert current_status([STALE_LINE]) == "stale"
+
+
 def test_current_status_returns_most_recent_by_timestamp_not_by_position():
-    # OK_LINE is later than STUCK_LINE -- a recovered collector shouldn't
-    # keep reading as stuck just because an older stuck line is also
-    # present in the lookback window.
-    assert current_status([STUCK_LINE, OK_LINE]) == "ok"
-    assert current_status([OK_LINE, STUCK_LINE]) == "ok"  # order-independent
+    later_stale = STALE_LINE.replace("15:36:17", "15:42:00")
+    assert current_status([STUCK_LINE, later_stale]) == "stale"
+    assert current_status([later_stale, STUCK_LINE]) == "stale"  # order-independent
 
 
 def test_current_status_none_when_no_health_line_present():
@@ -46,6 +55,37 @@ def test_current_status_none_when_no_health_line_present():
 
 def test_current_status_none_on_empty_input():
     assert current_status([]) is None
+
+
+# --- service_is_active -----------------------------------------------------
+
+
+def test_service_is_active_true_when_systemctl_reports_active():
+    with patch(
+        "govee_collector.ble_auto_reset.subprocess.run", return_value=_completed(returncode=0, stdout="active\n")
+    ):
+        assert service_is_active("govee-collector") is True
+
+
+def test_service_is_active_false_when_activating_mid_restart_loop():
+    # Exactly the 2026-08-22 incident's real state: "activating (auto-restart)".
+    with patch(
+        "govee_collector.ble_auto_reset.subprocess.run", return_value=_completed(returncode=3, stdout="activating\n")
+    ):
+        assert service_is_active("govee-collector") is False
+
+
+def test_service_is_active_false_when_failed():
+    with patch(
+        "govee_collector.ble_auto_reset.subprocess.run", return_value=_completed(returncode=3, stdout="failed\n")
+    ):
+        assert service_is_active("govee-collector") is False
+
+
+def test_service_is_active_false_on_subprocess_error():
+    # Fails safe -- an unreachable systemctl should not be read as healthy.
+    with patch("govee_collector.ble_auto_reset.subprocess.run", side_effect=FileNotFoundError("no systemctl")):
+        assert service_is_active("govee-collector") is False
 
 
 # --- should_reset (tiered backoff, table-driven) -----------------------
@@ -111,8 +151,9 @@ def test_load_state_round_trips(tmp_path):
 
 
 def test_fetch_recent_health_lines_runs_journalctl_with_unit_and_since():
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="a line\n", stderr="")
-    with patch("govee_collector.ble_auto_reset.subprocess.run", return_value=completed) as mock_run:
+    with patch(
+        "govee_collector.ble_auto_reset.subprocess.run", return_value=_completed(stdout="a line\n")
+    ) as mock_run:
         fetch_recent_health_lines("govee-collector", since_minutes=5)
 
     args = mock_run.call_args[0][0]
@@ -120,8 +161,10 @@ def test_fetch_recent_health_lines_runs_journalctl_with_unit_and_since():
 
 
 def test_fetch_recent_health_lines_raises_on_nonzero_exit():
-    completed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="No such unit")
-    with patch("govee_collector.ble_auto_reset.subprocess.run", return_value=completed):
+    with patch(
+        "govee_collector.ble_auto_reset.subprocess.run",
+        return_value=_completed(returncode=1, stderr="No such unit"),
+    ):
         with pytest.raises(JournalUnavailable):
             fetch_recent_health_lines("govee-collector", since_minutes=5)
 
@@ -135,41 +178,67 @@ def test_fetch_recent_health_lines_raises_on_subprocess_error():
 # --- main() wiring ---------------------------------------------------------
 
 
-def test_main_does_nothing_when_healthy(tmp_path, capsys):
-    state_path = tmp_path / "state.json"
-
+def _run_main(state_path, health_lines, service_active, **extra_argv):
     with (
-        patch("govee_collector.ble_auto_reset.fetch_recent_health_lines", return_value=[OK_LINE]),
+        patch("govee_collector.ble_auto_reset.fetch_recent_health_lines", return_value=health_lines),
+        patch("govee_collector.ble_auto_reset.service_is_active", return_value=service_active),
         patch("govee_collector.ble_auto_reset.subprocess.run") as mock_run,
     ):
         rc = main(["--state-path", str(state_path)])
+    return rc, mock_run
+
+
+def test_main_does_nothing_when_no_health_line_and_service_active(tmp_path):
+    # The real "everything's fine" case: collector.py never logs an
+    # explicit "ok" line, so this is what genuine health looks like.
+    rc, mock_run = _run_main(tmp_path / "state.json", [UNRELATED_LINE], service_active=True)
 
     assert rc == 0
     mock_run.assert_not_called()
 
 
-def test_main_clears_failure_count_once_healthy_again(tmp_path):
+def test_main_clears_failure_count_when_no_health_line_and_service_active(tmp_path):
     state_path = tmp_path / "state.json"
     state_path.write_text(json.dumps({"last_reset_at": "2026-08-21T15:00:00", "consecutive_failed_resets": 2}))
 
-    with (
-        patch("govee_collector.ble_auto_reset.fetch_recent_health_lines", return_value=[OK_LINE]),
-        patch("govee_collector.ble_auto_reset.subprocess.run") as mock_run,
-    ):
-        main(["--state-path", str(state_path)])
+    rc, mock_run = _run_main(state_path, [], service_active=True)
 
     mock_run.assert_not_called()
     assert json.loads(state_path.read_text())["consecutive_failed_resets"] == 0
 
 
+def test_main_resets_when_no_health_line_and_service_not_active(tmp_path):
+    # The actual 2026-08-22 bug: a crash-looping collector produces zero
+    # "Collector health: X" lines (it dies before reaching that code), and
+    # the old version of this script treated that as healthy. It must now
+    # be treated at least as seriously as "stuck".
+    state_path = tmp_path / "state.json"
+
+    rc, mock_run = _run_main(state_path, [], service_active=False)
+
+    assert rc == 0
+    mock_run.assert_called_once()
+    args = mock_run.call_args[0][0]
+    assert args[0].endswith("ble_nightly_reset.sh")
+
+    saved = json.loads(state_path.read_text())
+    assert saved["consecutive_failed_resets"] == 1
+    assert saved["last_reset_at"] is not None
+
+
+def test_main_does_nothing_for_stale_status_regardless_of_service_state(tmp_path):
+    # collector.py's own watchdog is still within its retry budget --
+    # an external reset shouldn't preempt it.
+    rc, mock_run = _run_main(tmp_path / "state.json", [STALE_LINE], service_active=True)
+
+    assert rc == 0
+    mock_run.assert_not_called()
+
+
 def test_main_runs_reset_script_when_stuck_and_never_reset_before(tmp_path):
     state_path = tmp_path / "state.json"
 
-    with (
-        patch("govee_collector.ble_auto_reset.fetch_recent_health_lines", return_value=[STUCK_LINE]),
-        patch("govee_collector.ble_auto_reset.subprocess.run") as mock_run,
-    ):
-        rc = main(["--state-path", str(state_path)])
+    rc, mock_run = _run_main(state_path, [STUCK_LINE], service_active=True)
 
     assert rc == 0
     mock_run.assert_called_once()
@@ -186,11 +255,7 @@ def test_main_skips_reset_when_still_in_cooldown(tmp_path):
     recent = datetime.now().isoformat()
     state_path.write_text(json.dumps({"last_reset_at": recent, "consecutive_failed_resets": 1}))
 
-    with (
-        patch("govee_collector.ble_auto_reset.fetch_recent_health_lines", return_value=[STUCK_LINE_LATER]),
-        patch("govee_collector.ble_auto_reset.subprocess.run") as mock_run,
-    ):
-        main(["--state-path", str(state_path)])
+    rc, mock_run = _run_main(state_path, [STUCK_LINE_LATER], service_active=True)
 
     mock_run.assert_not_called()
 

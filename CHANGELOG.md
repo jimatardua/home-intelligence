@@ -6,6 +6,24 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.47] - 2026-08-22
+
+- Fix two real bugs in `ble_auto_reset.py` found after a crash-looping
+  `govee-collector` went undetected for over an hour: a crashed process
+  produces zero "Collector health: X" log lines (it dies before reaching
+  that code), and the original script treated that the same as healthy,
+  silently clearing its own failure count instead of escalating. Root
+  cause of the ambiguity: `collector.py` never logs an explicit "ok" line
+  either, so "no health line" was ambiguous by construction between
+  "fine" and "crashed." `service_is_active()` adds `systemctl is-active`
+  as an independent second signal to disambiguate correctly. See
+  docs/govee-cigar-monitor.md's "2026-08-22" section.
+- The actual incident's root cause was a kernel-level Bluetooth HCI
+  lockup (below where `hciconfig`/`bluetoothd` operate) -- confirmed only
+  a full reboot clears it. Not yet wired into the automated reset path;
+  the user granted this session standing permission to reboot
+  mrteeny.ardua.lan directly when needed in the meantime.
+
 ## [1.0.46] - 2026-08-22
 
 - Docs only: record the infra-side resolution of the flapping-alert

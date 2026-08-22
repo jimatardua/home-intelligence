@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""CLI entry point: detects `collector.py`'s "stuck" BLE health status and
-runs `ble_nightly_reset.sh` automatically -- the on-detection counterpart
-to the existing nightly preemptive reset (see docs/govee-cigar-monitor.md).
+"""CLI entry point: detects `collector.py`'s "stuck" BLE health status (or
+its total absence) and runs `ble_nightly_reset.sh` automatically -- the
+on-detection counterpart to the existing nightly preemptive reset (see
+docs/govee-cigar-monitor.md).
 
 Meant to run every 2 minutes via cron on mrteeny. Detection is entirely
 local (parses this host's own `journalctl -u govee-collector`, not HA's
@@ -10,6 +11,32 @@ the same reasoning `automation_health` used `docker logs` for on domus.
 
 Reuses `collector.py`'s own stale/stuck thresholds by parsing its
 "Collector health: <status>" log line rather than re-deriving them here.
+
+Real incident, 2026-08-22: a *different* BLE failure mode (a kernel-level
+HCI lockup, "command tx timeout" in dmesg -- below where `hciconfig`/
+`bluetoothd` operate, confirmed live: the reset script's own `hciconfig
+hci0 up` failed with a connection timeout) left `govee-collector`
+crash-looping on startup, before it ever reached the code that logs
+"Collector health: X" at all. The original version of this script treated
+"no health line in the window" the same as "healthy" and cleared the
+failure count -- so it never retried and never escalated, for over an
+hour, completely silently.
+
+Fixing that isn't as simple as "treat None as stuck too", though:
+`collector.py` only ever logs that line when status is NOT "ok" (see its
+`if health_status != HEALTH_STATUS_OK:` guard) -- a genuinely healthy
+collector produces *zero* matching lines, same as a crashed one. `None`
+is ambiguous by construction between "nothing to report" and "never got
+far enough to report anything." Disambiguating needs a second, independent
+signal: `systemctl is-active`, which distinguishes a truly running process
+from one stuck in systemd's restart loop (`activating`) or dead
+(`failed`) -- exactly the evidence that caught this incident manually.
+`None` + actually running = healthy (clears backoff); `None` + not
+running = needs a reset, same urgency as "stuck". This is the same "a gap
+state should read as 'go check,' not 'everything's fine'" convention
+already used elsewhere in this project (see
+`cigar_dashboard/govee_history.py`'s `get_collector_health()`), just
+applied with a real second signal instead of guessing.
 """
 
 from __future__ import annotations
@@ -64,6 +91,23 @@ def fetch_recent_health_lines(unit: str, since_minutes: int, *, timeout: float =
     if result.returncode != 0:
         raise JournalUnavailable(f"journalctl -u {unit} exited {result.returncode}: {result.stderr.strip()}")
     return result.stdout.splitlines()
+
+
+def service_is_active(unit: str, *, timeout: float = 10.0) -> bool:
+    """True only for systemd's exact "active" state -- False for
+    "activating" (mid-restart-loop, exactly today's incident),
+    "failed", "inactive", or if `systemctl` itself couldn't be reached
+    (fails safe: an unreachable systemctl should not be read as "healthy")."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", unit],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "active"
 
 
 def current_status(lines: list[str]) -> str | None:
@@ -126,17 +170,34 @@ def main(argv: list[str] | None = None) -> int:
     state = load_state(args.state_path)
     now = datetime.now()
 
-    if status != STUCK:
-        if state["consecutive_failed_resets"] != 0:
-            state["consecutive_failed_resets"] = 0
-            save_state(args.state_path, state)
-            print(f"Collector health is {status!r} -- clearing failed-reset count")
+    if status == "stale":
+        # collector.py's own watchdog is still within its own retry
+        # budget (STUCK_AFTER_CONSECUTIVE_FAILURES) -- give it a chance to
+        # self-heal before an external reset jumps in. Neither reset nor
+        # clear the failure count here; genuinely unresolved either way.
         return 0
 
+    if status is None:
+        # Ambiguous by construction (see module docstring): collector.py
+        # never logs an explicit "ok" line, so "nothing in the window"
+        # means either "genuinely healthy" or "crashed before it could
+        # report anything." Disambiguate with a second, independent
+        # signal -- is the process actually running right now?
+        if service_is_active(SYSTEMD_UNIT):
+            if state["consecutive_failed_resets"] != 0:
+                state["consecutive_failed_resets"] = 0
+                save_state(args.state_path, state)
+                print("No health line, but the service is genuinely active -- clearing failed-reset count")
+            return 0
+        reason = "no health signal at all, and the service is not active (crash loop)"
+    else:
+        reason = "stuck"
+
+    # status is "stuck", or None-and-not-actually-running.
     if not should_reset(state, now):
         return 0
 
-    print("Collector health is 'stuck' -- running ble_nightly_reset.sh")
+    print(f"Collector health: {reason} -- running ble_nightly_reset.sh")
     subprocess.run([str(RESET_SCRIPT)], check=False)
     state["last_reset_at"] = now.isoformat()
     state["consecutive_failed_resets"] = state.get("consecutive_failed_resets", 0) + 1

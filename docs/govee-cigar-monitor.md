@@ -325,6 +325,62 @@ Verified against the real captured log lines from the 2026-08-21 incident
 `current_status()`/`should_reset()` correctly identify that window as
 needing an immediate reset attempt.
 
+## 2026-08-22: crash-loop went undetected for over an hour -- two real bugs
+
+The dashboard's banner reappeared the next day with a different message
+("Collector health unknown"), and the auto-reset above never fired.
+Investigation found a genuinely different failure mode, and two real bugs
+in the code written to handle the first one.
+
+**A different failure mode.** `dmesg` showed `hci0` had wedged at the
+*kernel* level (`command 0x200c tx timeout`, even a basic HCI Reset --
+`Opcode 0x0c03` -- failing), below where `hciconfig`/`bluetoothd` operate.
+Confirmed live: manually re-running `ble_nightly_reset.sh`'s own
+`hciconfig hci0 up` failed with the same `Connection timed out (110)`.
+Only a full reboot cleared it (the user rebooted directly; `docker ps`
+showed nothing running and no NFS mounts active, so it was low-risk).
+
+**Bug 1**: the reset script's `hciconfig` call failing silently (via
+`set -uo pipefail`, not `-e`, so the script continues past a failed step)
+meant `govee-collector` restarted into an immediate crash loop --
+`await scanner.start()` throws before the code that logs `"Collector
+health: X"` is ever reached, so the crash-looping process produced *zero*
+matching log lines. The original `ble_auto_reset.py` treated "no health
+line in the window" as healthy and cleared the failure count -- so it
+never retried and never escalated, for over an hour, completely silently.
+
+**Bug 2, found while fixing Bug 1**: `collector.py` only logs `"Collector
+health: X"` when status is NOT `"ok"` (`if health_status !=
+HEALTH_STATUS_OK:`) -- a genuinely healthy collector produces *zero*
+matching lines too. So "no health line at all" is ambiguous by
+construction between "everything's fine" and "crashed before it could
+report anything" -- the exact two cases that need opposite responses. The
+original code couldn't tell them apart (that's what made Bug 1 possible
+in the first place: the fix for Bug 1 isn't "treat None as stuck",
+because that would also start incorrectly resetting a genuinely healthy
+collector every cycle).
+
+**Fix**: `service_is_active()` adds a second, independent signal --
+`systemctl is-active govee-collector` -- which distinguishes a truly
+running process from one stuck in systemd's restart loop (`activating`,
+exactly this incident's real state) or dead (`failed`). Disambiguation:
+no health line + service genuinely active = healthy (clears backoff); no
+health line + service not active = needs a reset, same urgency as
+`"stuck"`. `"stale"` is left alone either way -- `collector.py`'s own
+watchdog is still within its own retry budget for that one.
+
+Considered and rejected: making `collector.py` log an explicit `"ok"`
+line every `FLUSH_INTERVAL_SECONDS` (15s) to close the ambiguity at the
+source instead. Would work, but turns a "log on problems only" daemon
+into one logging ~5,760 lines/day of pure noise for the routine case --
+`service_is_active()` gets the same disambiguating signal from systemd
+directly, for free, without touching the well-tested core daemon's
+logging cadence.
+
+Deployed and confirmed live: ran the fixed script by hand against the
+now-healthy (post-reboot) collector -- correctly identified no health
+line + service active as healthy, made no unnecessary state-file writes.
+
 ## Known risks / things to watch
 
 - **The `govee-collector` MQTT login has full, unscoped broker access**,
@@ -366,6 +422,23 @@ needing an immediate reset attempt.
   `hciconfig`/`systemctl`, used only by these two dedicated scripts,
   achieves the same outcome without widening the collector process's own
   privileges.
+- **A fourth wedge (2026-08-22) was a different, worse failure class**
+  that neither reset script can actually fix -- a kernel-level HCI
+  lockup (see "2026-08-22" above), below where `hciconfig`/`bluetoothd`
+  operate. `ble_auto_reset.py` now correctly *detects* this class too
+  (Bug 1/2 fixes above), but its only remediation is still the same
+  `hciconfig`/`bluetoothd`-based reset -- which cannot clear a kernel-level
+  lockup, confirmed live (a manual retry of the exact same commands failed
+  identically). Only a full reboot cleared it. **Not yet wired into the
+  automated path** -- today, a kernel-level lockup still means
+  `ble_auto_reset.py` will keep retrying on its normal backoff schedule
+  (5min/15min/hourly) without ever actually succeeding, until a human
+  reboots mrteeny manually. The user has granted standing permission for
+  this session to reboot mrteeny.ardua.lan directly when needed (not
+  wired into `ble_auto_reset.py` itself); whether to add reboot as a
+  further escalation tier in the automated script -- e.g. after N
+  consecutive failed `hciconfig`-based resets -- is an open question, not
+  yet decided.
 
 ## Status
 
@@ -411,13 +484,23 @@ needing an immediate reset attempt.
       cron'd 4am America/Denver on mrteeny) -- added after the BlueZ
       wedge recurred a second time (2026-08-10, 2026-08-14). See
       "Preemptive nightly BLE reset" above.
-- [x] On-detection BLE auto-reset (`ble_auto_reset.py`, 26 tests passing,
+- [x] On-detection BLE auto-reset (`ble_auto_reset.py`, 33 tests passing,
       cron'd every 2 minutes on mrteeny) -- added after the wedge recurred
       a third time (2026-08-21), mid-afternoon, outside the nightly
       window. Entirely local to mrteeny (parses `journalctl`, no
       dependency on domus/HA/MQTT reachability), tiered backoff if a
       reset doesn't actually clear it. See "On-detection BLE auto-reset"
       above.
+- [x] Fixed two real bugs after a fourth wedge (2026-08-22) went
+      undetected for over an hour: a crash-looping collector produced no
+      health log lines at all (treated as healthy, not as "possible
+      crash"), and that ambiguity existed because `collector.py` never
+      logs an explicit "ok" line either. `service_is_active()` adds
+      `systemctl is-active` as a second, independent signal to
+      disambiguate. See "2026-08-22: crash-loop went undetected" above.
+      Kernel-level HCI lockups (this incident's actual root cause) are
+      now correctly *detected* but still need a manual reboot to actually
+      *fix* -- not yet automated.
 - [x] Swipe-to-navigate between the three pages (`nav.render_swipe_nav_script`
       in `site_shared`). Full writeup in `docs/site-shared.md`. Confirmed
       live on a real iPad, both directions.
