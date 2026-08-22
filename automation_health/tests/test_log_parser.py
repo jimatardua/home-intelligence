@@ -82,9 +82,9 @@ def test_count_errors_by_automation_attributes_watched_automations_independently
     # rest_command (1x) and the automation's own logger (2x). Both are
     # counted, as independent, non-deduplicated signals (see const.py).
     lines = [REST_COMMAND_DNS_ERROR, WEATHERCLOUD_SCRIPT_ERROR, WEATHERCLOUD_AUTOMATION_ERROR]
-    now = datetime(2026, 8, 20, 18, 0, 0)
+    since = datetime(2026, 8, 20, 17, 0, 0)
 
-    counts = count_errors_by_automation(lines, now, lookback_minutes=30)
+    counts = count_errors_by_automation(lines, since)
 
     assert counts["weathercloud_upload"] == 2
     assert counts["rest_command"] == 1
@@ -92,30 +92,38 @@ def test_count_errors_by_automation_attributes_watched_automations_independently
 
 
 def test_count_errors_by_automation_excludes_warning_level():
-    now = datetime(2026, 8, 20, 20, 0, 0)
+    since = datetime(2026, 8, 20, 19, 0, 0)
 
-    counts = count_errors_by_automation([WEATHERCLOUD_502_WARNING], now, lookback_minutes=30)
+    counts = count_errors_by_automation([WEATHERCLOUD_502_WARNING], since)
 
     assert counts["rest_command"] == 0
 
 
 def test_count_errors_by_automation_excludes_unrelated_loggers():
-    now = datetime(2026, 8, 20, 18, 0, 0)
+    since = datetime(2026, 8, 20, 17, 0, 0)
 
-    counts = count_errors_by_automation([UNRELATED_TESLA_DNS_ERROR], now, lookback_minutes=30)
+    counts = count_errors_by_automation([UNRELATED_TESLA_DNS_ERROR], since)
 
     assert all(c == 0 for c in counts.values())
 
 
-def test_count_errors_by_automation_excludes_lines_outside_the_lookback_window():
-    now = datetime(2026, 8, 20, 19, 0, 0)  # REST_COMMAND_DNS_ERROR is 17:40 -- 80 min earlier
+def test_count_errors_by_automation_excludes_lines_before_since():
+    since = datetime(2026, 8, 20, 18, 0, 0)  # REST_COMMAND_DNS_ERROR is 17:40 -- before `since`
 
-    counts = count_errors_by_automation([REST_COMMAND_DNS_ERROR], now, lookback_minutes=30)
+    counts = count_errors_by_automation([REST_COMMAND_DNS_ERROR], since)
 
     assert counts["rest_command"] == 0
 
 
+def test_count_errors_by_automation_includes_lines_exactly_at_since():
+    since = datetime(2026, 8, 20, 17, 40, 2)  # exactly REST_COMMAND_DNS_ERROR's own timestamp
+
+    counts = count_errors_by_automation([REST_COMMAND_DNS_ERROR], since)
+
+    assert counts["rest_command"] == 1
+
+
 def test_count_errors_by_automation_always_includes_every_known_label():
-    counts = count_errors_by_automation([], datetime(2026, 8, 20, 18, 0, 0), lookback_minutes=30)
+    counts = count_errors_by_automation([], datetime(2026, 8, 20, 18, 0, 0))
 
     assert counts == {"weathercloud_upload": 0, "wu_pwsweather_upload": 0, "rest_command": 0}

@@ -7,3 +7,4 @@ __pycache__/
 rmp/poc_output.txt
 rmp/poc_encrypted_output.txt
 govee_collector/auto_reset_state.json
+automation_health/collector_state.json

@@ -10,7 +10,7 @@ ever touches the text after the `[logger]` prefix, and nothing downstream
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 import re
 
 from automation_health.const import REST_COMMAND_LABEL, REST_COMMAND_LOGGER, WATCHED_AUTOMATIONS
@@ -52,14 +52,22 @@ def _label_for_logger(logger: str) -> str | None:
     return _AUTOMATION_LOGGERS.get(logger)
 
 
-def count_errors_by_automation(lines: list[str], now: datetime, lookback_minutes: int) -> dict[str, int]:
-    """ERROR-level counts within the lookback window, keyed by label.
-    Always includes every known label at 0 if nothing matched, so a
-    healthy window still emits the full label set (see exporter.py)."""
+def count_errors_by_automation(lines: list[str], since: datetime) -> dict[str, int]:
+    """ERROR-level counts at or after `since`, keyed by label. Always
+    includes every known label at 0 if nothing matched, so a healthy
+    window still emits the full label set (see exporter.py).
+
+    `since` is deliberately the caller's concern, not a lookback duration
+    computed here -- collect.py passes the timestamp of the last
+    successful collection (a disjoint delta window, not a sliding one) so
+    a single isolated blip is only ever counted once, in the one reading
+    that actually covers it, rather than smeared across every reading for
+    the next N minutes. See docs/automation-health.md's "Flapping alert"
+    section for why a sliding window caused real alert flapping.
+    """
     counts = {label: 0 for label in list(WATCHED_AUTOMATIONS.values()) + [REST_COMMAND_LABEL]}
-    cutoff = now - timedelta(minutes=lookback_minutes)
     for entry in parse_lines(lines):
-        if entry.level != "ERROR" or entry.at < cutoff:
+        if entry.level != "ERROR" or entry.at < since:
             continue
         label = _label_for_logger(entry.logger)
         if label is not None:

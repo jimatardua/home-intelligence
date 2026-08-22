@@ -10,6 +10,14 @@ from __future__ import annotations
 
 DOCKER_CONTAINER = "homeassistant"
 
+# Fallback lookback for the very first run only (no prior state to compute
+# a delta window from) -- every subsequent run uses the delta-since-last-
+# check window instead (see collect.py). A 30-min *sliding* lookback was
+# the original design; real incident data (2026-08-21/22) showed it smears
+# a single 5-minute blip across up to 30 minutes of readings, long enough
+# to satisfy a naive "sustained >0 for 10m" alert every time even though
+# nothing was still broken -- see docs/automation-health.md's "Flapping
+# alert" section.
 DEFAULT_LOOKBACK_MINUTES = 30
 
 # node_exporter's textfile collector -- owned by node_exporter:node_exporter,

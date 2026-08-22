@@ -19,8 +19,9 @@ from automation_health.const import COLLECTION_TIMESTAMP_METRIC_NAME, METRIC_NAM
 
 _HELP = (
     f"# HELP {METRIC_NAME} Count of ERROR-level Home Assistant log lines "
-    "in the lookback window (docker logs homeassistant), per logger -- "
-    "NOT deduplicated per failed run. See automation_health/log_parser.py."
+    "since the last successful collection (a disjoint delta window, not a "
+    "sliding one -- see collect.py), per logger, NOT deduplicated per "
+    "failed run. See automation_health/log_parser.py."
 )
 _TYPE = f"# TYPE {METRIC_NAME} gauge"
 

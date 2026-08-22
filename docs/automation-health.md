@@ -149,14 +149,17 @@ serves slightly-stale data instead of a false "all clear."
 
 ### Verification
 
-- 23 tests (`automation_health/tests/`) -- `log_parser.py` tested against
+- 32 tests (`automation_health/tests/`) -- `log_parser.py` tested against
   real captured log lines from the actual incident (exact format, ANSI
   codes included in the docker_log tests specifically, since that's the
   layer responsible for stripping them), including an explicit test that a
   line with the real embedded password never surfaces in a parsed
   `LogEntry`; `exporter.py` tested for correct Prometheus text and the
   exact `sudo install` invocation (subprocess mocked); `collect.py` tested
-  for correct wiring and for leaving the previous file alone on failure.
+  for correct wiring, for leaving the previous file (and `last_collected_at`)
+  untouched on failure, for falling back to the default lookback on a
+  first-ever run, and for computing the delta window correctly on
+  subsequent runs.
 - Deployed and run once by hand on domus, confirmed the `.prom` file
   appears with correct ownership and content.
 - Sanity-checked the parser against the actual saved incident log excerpt
@@ -169,6 +172,59 @@ serves slightly-stale data instead of a false "all clear."
   not in this parser, which doesn't filter by keyword at all and is
   confirmed correct by the dedicated unit tests instead.
 
+## Flapping alert (2026-08-21/22)
+
+Once the Grafana alert (`>0 sustained for 10m`) was live, it paged
+repeatedly overnight -- both on `domus` and on `popcorn` (confirmed to be
+the same physical machine under two separate Prometheus scrape labels, so
+every real event was being counted, and paged, twice).
+
+**Not a repeat of the original outage.** Pulling the actual `docker logs`
+for the affected day showed 8 separate, brief, isolated blips -- one
+failed automation attempt, resolved by the very next retry 5 minutes
+later -- roughly every 1-3 hours, all day, every single one hitting only
+`wu_and_pwsweather` (never `weathercloud`). Most likely ongoing low-grade
+DNS flakiness specifically resolving `wunderground.com`/`pwsweather.com`,
+possibly the tail of the same Docker/hassio bridge issue from the original
+incident, now showing as brief blips instead of a sustained outage rather
+than something new.
+
+**Why it paged anyway**: the exporter's original design used a 30-minute
+*sliding* lookback window -- every collection run counted "errors in the
+last 30 minutes," re-counting the same event on every run until it aged
+out. A single 5-minute blip stayed visible in the metric for up to 30
+minutes afterward, comfortably longer than Grafana's 10-minute sustained
+threshold -- so every one of those 8 harmless, self-recovering blips
+triggered a full WARNING -> Resolved page cycle. The alert was working
+exactly as configured; the metric it was reading was the problem. A
+boolean `>0` threshold can't tell "one blip" from "a real systemic
+outage" on its own -- only magnitude or a properly-scoped window can.
+
+**Fix**: `collect.py` now counts errors *since the last successful
+collection* -- a disjoint delta window, not a sliding one -- persisted via
+a small state file (`automation_health/collector_state.json`, gitignored,
+runtime state not config). A single isolated blip is now visible in only
+the one reading that actually covers it, for at most one collection
+interval, well under any reasonable sustained-alert threshold; a
+genuinely ongoing problem still shows up in every consecutive reading,
+since new errors keep landing inside each new window as they happen --
+detection latency for a real incident is actually *better* than before,
+not worse. Cron cadence tightened from 10 to 5 minutes to match
+`wu_pwsweather_upload`'s own trigger interval (the tightest of the two
+watched automations), so the collection window is never wider than
+necessary to avoid missing a real occurrence.
+
+Relayed to the infrastructure session as a two-part fix: the exporter
+change above (this project's side, shipped immediately since the flapping
+was actively disrupting sleep and infra wasn't reachable at the time) plus
+a recommendation to also switch their Grafana alert condition from a
+boolean `>0` to a count threshold (e.g. `>= 6 sustained for 10m`) as
+defense in depth, backed by the real data above: isolated blips = 2-3 per
+label per window, worst coincidental double-blip = 6, the original
+10-hour outage would have produced 100+ per label per window. Also flagged
+the domus/popcorn double-counting as worth deduping at the scrape-config
+level, separately from the alerting-logic fix.
+
 ## Not in scope
 
 - **`automation.upload_eve_weather_readings_to_weather_underground`** --
@@ -179,5 +235,11 @@ serves slightly-stale data instead of a false "all clear."
 - **The WU/PWSWeather plaintext-password-in-logs issue** described above --
   worth fixing on HA's side at some point, but a separate concern from
   either the outage or these two fixes.
-- **Grafana alert rule** -- explicitly the infrastructure session's side,
-  once this metric exists and is confirmed live.
+- **The Grafana alert rule's exact threshold/condition** -- explicitly the
+  infrastructure session's side to change; a count-based threshold was
+  recommended (see "Flapping alert" above) as defense in depth, but the
+  primary fix (the exporter's delta window) already shipped from this
+  side and doesn't depend on that recommendation being taken.
+- **Deduping domus/popcorn as the same machine at the Prometheus
+  scrape-config level** -- flagged to infra, not this project's config to
+  change.

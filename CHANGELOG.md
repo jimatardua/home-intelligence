@@ -6,6 +6,20 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.45] - 2026-08-22
+
+- Fix the `home_intelligence_automation_upload_errors` alert flapping
+  repeatedly overnight -- the exporter's original 30-minute sliding
+  lookback smeared any single isolated blip across up to 30 minutes of
+  readings, long enough to satisfy a naive "sustained >0 for 10m" Grafana
+  alert every time even though nothing was actually still broken.
+  `collect.py` now counts errors since the last successful collection (a
+  disjoint delta window, persisted via a small state file), with cron
+  cadence tightened from 10 to 5 minutes to match. A single blip is now
+  visible for at most one collection interval; a genuinely sustained
+  problem still triggers correctly, faster than before. See
+  docs/automation-health.md's "Flapping alert" section.
+
 ## [1.0.44] - 2026-08-21
 
 - Add `govee_collector/ble_auto_reset.py` -- detects `collector.py`'s own
