@@ -18,7 +18,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import paho.mqtt.client as mqtt
 from bleak import BleakScanner
@@ -61,11 +61,17 @@ RESTART_RETRY_INTERVAL_SECONDS = 60.0
 # 3 failed restart attempts in a row (>= ~3 minutes of retrying, on top of
 # the 3 minutes it took to detect the stall in the first place) means the
 # watchdog isn't going to fix this on its own -- almost certainly BlueZ's
-# adapter-level discovery state is stuck (org.bluez.Error.InProgress), which
-# needs a real reset (`hciconfig hci0 down`/`up` + `systemctl restart
+# adapter-level discovery state is stuck, which needs a real reset (`hciconfig hci0 down`/`up` + `systemctl restart
 # bluetooth`) the collector deliberately doesn't have the privileges to do
 # itself. This is exactly the distinction the "Problem"/"Status" HA
 # entities (discovery.py) exist to surface -- see docs/govee-cigar-monitor.md.
+#
+# "Failed" here means "did not produce an advertisement," NOT "raised an
+# exception": run() increments this on every restart attempt and only the
+# advertisement callback clears it. Both known lockup classes are covered
+# that way -- the noisy one (org.bluez.Error.InProgress on start) and the
+# silent one found 2026-09-09, where every BlueZ call succeeds and no
+# advertisement is ever delivered.
 STUCK_AFTER_CONSECUTIVE_FAILURES = 3
 
 HEALTH_STATUS_OK = "ok"
@@ -144,6 +150,50 @@ def should_attempt_restart(last_advertisement_at: float, last_restart_attempt_at
     return is_stale(last_advertisement_at, now) and (now - last_restart_attempt_at) > RESTART_RETRY_INTERVAL_SECONDS
 
 
+@dataclass(frozen=True)
+class WatchdogState:
+    """The stall watchdog's bookkeeping, as one immutable value.
+
+    Exists because the 2026-09-09 blind-collector incident lived entirely
+    in run()'s loose local variables -- the one part of this module with no
+    unit tests, precisely because it was tangled up with asyncio and bleak.
+    Modelling the bookkeeping as pure transitions over a single value (the
+    same approach apply_advertisement() already takes for device state)
+    makes both known BLE failure modes testable with no hardware at all.
+    """
+
+    last_advertisement_at: float
+    last_restart_attempt_at: float = 0.0
+    consecutive_restart_failures: int = 0
+
+
+def after_advertisement(watchdog: WatchdogState, now: float) -> WatchdogState:
+    """A real Govee decode just arrived -- the staleness clock resets and
+    the failure count clears. An advertisement is the *only* evidence that
+    the scan session actually works, which is why this is the only place
+    either of those two things happens."""
+    return replace(watchdog, last_advertisement_at=now, consecutive_restart_failures=0)
+
+
+def after_restart_attempt(watchdog: WatchdogState, now: float) -> WatchdogState:
+    """A restart of the scan session was just attempted, whether or not the
+    BlueZ calls appeared to succeed.
+
+    Deliberately does NOT advance last_advertisement_at, and counts the
+    attempt as a failure until an advertisement proves otherwise. The
+    earlier version did the opposite -- treating a non-raising
+    `scanner.start()` as success and resetting the staleness clock -- which
+    is exactly what made the 2026-09-09 kernel-level HCI lockup invisible:
+    every BlueZ call succeeded while zero advertisements were delivered, so
+    health published "ok" for 13 hours and nothing ever escalated.
+    """
+    return replace(
+        watchdog,
+        last_restart_attempt_at=now,
+        consecutive_restart_failures=watchdog.consecutive_restart_failures + 1,
+    )
+
+
 def compute_health_status(last_advertisement_at: float, consecutive_restart_failures: int, now: float) -> str:
     """"ok" while advertisements are arriving normally; "stale" once the
     watchdog notices a gap but is still within its retry budget; "stuck"
@@ -200,33 +250,33 @@ def _build_client() -> mqtt.Client:
 async def run() -> None:
     state: dict[str, DeviceState] = {}
     client = _build_client()
-    last_advertisement_at = time.time()
-    consecutive_restart_failures = 0
+    watchdog = WatchdogState(last_advertisement_at=time.time())
 
     def callback(device, adv) -> None:
-        nonlocal state, last_advertisement_at, consecutive_restart_failures
+        nonlocal state, watchdog
         updated = apply_advertisement(state, device.address, adv.manufacturer_data, adv.rssi)
         if updated is not state:  # a real Govee decode, not just BLE noise from other devices
-            last_advertisement_at = time.time()
-            consecutive_restart_failures = 0  # proof the scan session is genuinely healthy again
+            watchdog = after_advertisement(watchdog, time.time())
         state = updated
 
     scanner = BleakScanner(callback)
     await scanner.start()
     LOGGER.info("Scanning for Govee sensors...")
-    last_restart_attempt_at = 0.0
 
     try:
         while True:
             await asyncio.sleep(FLUSH_INTERVAL_SECONDS)
             now = time.time()
 
-            if should_attempt_restart(last_advertisement_at, last_restart_attempt_at, now):
+            if should_attempt_restart(watchdog.last_advertisement_at, watchdog.last_restart_attempt_at, now):
                 LOGGER.warning(
                     "No Govee advertisement in %.0fs -- restarting the BLE scan session",
-                    now - last_advertisement_at,
+                    now - watchdog.last_advertisement_at,
                 )
-                last_restart_attempt_at = now
+                # Bookkeeping happens BEFORE the attempt, and counts it as a
+                # failure until an advertisement proves otherwise -- see
+                # after_restart_attempt() for why (2026-09-09 incident).
+                watchdog = after_restart_attempt(watchdog, now)
                 try:
                     await scanner.stop()
                 except Exception:
@@ -234,8 +284,10 @@ async def run() -> None:
                 try:
                     scanner = BleakScanner(callback)
                     await scanner.start()
-                    last_advertisement_at = time.time()  # give the fresh session a full window
-                    LOGGER.info("BLE scan session restarted successfully")
+                    LOGGER.info(
+                        "BLE scan session restarted (%d restart(s) so far with no advertisement since)",
+                        watchdog.consecutive_restart_failures,
+                    )
                 except Exception:
                     # Most likely BlueZ's adapter-level discovery state is
                     # itself stuck (org.bluez.Error.InProgress) -- a plain
@@ -243,18 +295,21 @@ async def run() -> None:
                     # crash: log and let the next watchdog check retry,
                     # with systemd's Restart=always as the final fallback
                     # if this process ever exits some other way.
-                    consecutive_restart_failures += 1
                     LOGGER.exception(
                         "Failed to restart the BLE scan session (%d consecutive failures) -- will retry",
-                        consecutive_restart_failures,
+                        watchdog.consecutive_restart_failures,
                     )
 
-            health_status = compute_health_status(last_advertisement_at, consecutive_restart_failures, now)
+            health_status = compute_health_status(
+                watchdog.last_advertisement_at, watchdog.consecutive_restart_failures, now
+            )
             if health_status != HEALTH_STATUS_OK:
                 LOGGER.warning("Collector health: %s", health_status)
             client.publish(
                 HEALTH_TOPIC,
-                build_health_payload(last_advertisement_at, consecutive_restart_failures, now),
+                build_health_payload(
+                    watchdog.last_advertisement_at, watchdog.consecutive_restart_failures, now
+                ),
                 qos=1,
                 retain=True,
             )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-from cigar_dashboard.govee_history import CollectorHealth, DeviceReading, HistoryPoint
+from cigar_dashboard.govee_history import CollectorHealth, DataFreshness, DeviceReading, HistoryPoint
 from cigar_dashboard.render import (
     DEVICE_COLORS,
     RESET_INSTRUCTIONS,
@@ -256,3 +256,116 @@ def test_render_html_redraws_charts_on_themechange_from_cached_data():
 
     assert "document.addEventListener('themechange'" in html
     assert "let lastData = null;" in html
+
+
+# --- Banner: data staleness outranks the collector's self-report ----------
+
+
+def _freshness(stale=(), all_stale=False, **ages) -> DataFreshness:
+    seconds = {"TH01": 30.0, "TH02": 30.0, "TH03": 30.0}
+    seconds.update(ages)
+    return DataFreshness(
+        seconds_since_newest=seconds, stale_device_ids=tuple(stale), all_devices_stale=all_stale
+    )
+
+
+def test_no_banner_when_data_is_flowing_and_collector_is_happy():
+    ctx = _minimal_context(data_freshness=_freshness())
+
+    data = json.loads(render_data_json(ctx))
+    html = render_html(ctx)
+
+    assert data["banner"]["message"] is None
+    assert data["data_freshness"]["is_problem"] is False
+    assert 'id="health-banner" style="display:none"' in html
+
+
+def test_all_devices_stale_banner_names_the_gap_and_contradicts_the_collector():
+    # The 2026-09-09 shape exactly: 13 hours of nothing while the collector
+    # insisted it was fine. The banner has to say both halves, or a reader
+    # checks the collector's "ok" and concludes the dashboard is confused.
+    ctx = _minimal_context(
+        collector_health=CollectorHealth(is_problem=False, status="ok", seconds_since_last_reading=135.0),
+        data_freshness=_freshness(
+            stale=("TH01", "TH02", "TH03"), all_stale=True, TH01=13 * 3600.0, TH02=13 * 3600.0, TH03=13 * 3600.0
+        ),
+    )
+
+    data = json.loads(render_data_json(ctx))
+    message = data["banner"]["message"]
+
+    assert "any sensor" in message
+    assert "13h 0m" in message
+    assert '"ok"' in message  # the claim being contradicted, quoted
+    assert data["banner"]["show_fix"] is True
+    assert data["data_freshness"]["is_problem"] is True
+
+
+def test_all_devices_stale_banner_is_visible_on_first_paint_with_the_fix_block():
+    ctx = _minimal_context(
+        data_freshness=_freshness(stale=("TH01", "TH02", "TH03"), all_stale=True, TH01=3600.0, TH02=3600.0, TH03=3600.0)
+    )
+
+    html = render_html(ctx)
+
+    assert 'id="health-banner" style="display:flex"' in html
+    assert 'id="health-banner-fix" style="display:block"' in html
+    assert RESET_INSTRUCTIONS in html
+
+
+def test_single_stale_device_names_it_and_hides_the_adapter_reset():
+    # One sensor quiet while the others report is a battery/range problem,
+    # so the BLE-adapter reset commands are the wrong advice here.
+    ctx = _minimal_context(data_freshness=_freshness(stale=("TH02",), TH02=70 * 60.0))
+
+    data = json.loads(render_data_json(ctx))
+    html = render_html(ctx)
+
+    assert "Drybox" in data["banner"]["message"]
+    assert "1h 10m" in data["banner"]["message"]
+    assert data["banner"]["show_fix"] is False
+    assert 'id="health-banner-fix" style="display:none"' in html
+
+
+def test_collector_problem_still_shows_when_data_is_fresh():
+    # Fresh data but the collector is retrying -- the old behaviour, still
+    # worth surfacing; this check must not have replaced it.
+    ctx = _minimal_context(
+        collector_health=CollectorHealth(is_problem=True, status="stuck", seconds_since_last_reading=400.0),
+        data_freshness=_freshness(),
+    )
+
+    data = json.loads(render_data_json(ctx))
+
+    assert "stuck" in data["banner"]["message"]
+    assert data["banner"]["show_fix"] is True
+
+
+def test_stale_data_message_wins_when_both_signals_fire():
+    ctx = _minimal_context(
+        collector_health=CollectorHealth(is_problem=True, status="stuck", seconds_since_last_reading=400.0),
+        data_freshness=_freshness(stale=("TH01", "TH02", "TH03"), all_stale=True, TH01=1800.0, TH02=1800.0, TH03=1800.0),
+    )
+
+    message = json.loads(render_data_json(ctx))["banner"]["message"]
+
+    assert "any sensor" in message  # the evidence, not the claim
+    assert "appears stuck" not in message
+
+
+def test_never_seen_device_reads_as_ever_not_as_zero_minutes():
+    ctx = _minimal_context(data_freshness=_freshness(stale=("TH03",), TH03=None))
+
+    message = json.loads(render_data_json(ctx))["banner"]["message"]
+
+    assert "in ever" in message  # "No new readings from Desk in ever"
+    assert "0m" not in message
+
+
+def test_page_js_reads_the_prebuilt_banner_rather_than_rebuilding_it():
+    # Guards the DRY fix: the message text must exist in one place. If the
+    # JS ever goes back to composing its own strings, this fails.
+    html = render_html(_minimal_context(data_freshness=_freshness()))
+
+    assert "applyBanner(d.banner)" in html
+    assert "automatic retries have failed" not in html.split("<script>")[-1]

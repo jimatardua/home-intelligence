@@ -5,6 +5,7 @@ import json
 import pytest
 
 from govee_collector.collector import (
+    FLUSH_INTERVAL_SECONDS,
     HEALTH_STATUS_OK,
     HEALTH_STATUS_STALE,
     HEALTH_STATUS_STUCK,
@@ -12,6 +13,9 @@ from govee_collector.collector import (
     STALE_RESTART_THRESHOLD_SECONDS,
     STUCK_AFTER_CONSECUTIVE_FAILURES,
     DeviceState,
+    WatchdogState,
+    after_advertisement,
+    after_restart_attempt,
     apply_advertisement,
     build_health_payload,
     build_state_payload,
@@ -211,3 +215,113 @@ def test_build_health_payload_shape_when_stuck():
         "seconds_since_last_advertisement": round(STALE_RESTART_THRESHOLD_SECONDS + 42),
         "consecutive_restart_failures": STUCK_AFTER_CONSECUTIVE_FAILURES,
     }
+
+
+# --- Watchdog state transitions (2026-09-09 blind-collector regression) ----
+#
+# The incident these cover: a kernel-level HCI lockup on mrteeny left hci0
+# accepting every BlueZ call while delivering zero advertisements. The old
+# run() treated a non-raising `scanner.start()` as success and reset the
+# staleness clock on every restart, so health published "ok" for 13 hours
+# while the collector was completely blind, ble_auto_reset.py never saw a
+# "stuck" line to escalate on, and the outage surfaced only as blank
+# readings on the dashboard that a human happened to notice.
+
+
+def test_after_advertisement_resets_clock_and_clears_failures():
+    watchdog = WatchdogState(
+        last_advertisement_at=500.0, last_restart_attempt_at=900.0, consecutive_restart_failures=7
+    )
+
+    updated = after_advertisement(watchdog, now=1000.0)
+
+    assert updated.last_advertisement_at == 1000.0
+    assert updated.consecutive_restart_failures == 0
+    assert updated.last_restart_attempt_at == 900.0  # untouched
+
+
+def test_after_restart_attempt_does_not_advance_the_staleness_clock():
+    # The heart of the bug: a restart attempt is not evidence of recovery,
+    # so it must not make the collector look freshly-fed.
+    watchdog = WatchdogState(last_advertisement_at=500.0)
+
+    updated = after_restart_attempt(watchdog, now=1000.0)
+
+    assert updated.last_advertisement_at == 500.0
+    assert updated.last_restart_attempt_at == 1000.0
+    assert updated.consecutive_restart_failures == 1
+
+
+def _simulate_flush_loop(watchdog: WatchdogState, start: float, cycles: int, *, advertisements: bool):
+    """Drive the same pure decisions run()'s loop makes, one flush at a time.
+
+    `advertisements=False` models the silent lockup (every restart call
+    returns cleanly, nothing is ever delivered); True models a working
+    adapter that responds to the restart.
+    """
+    now = start
+    statuses = []
+    for _ in range(cycles):
+        now += FLUSH_INTERVAL_SECONDS
+        if should_attempt_restart(watchdog.last_advertisement_at, watchdog.last_restart_attempt_at, now):
+            watchdog = after_restart_attempt(watchdog, now)
+            if advertisements:
+                watchdog = after_advertisement(watchdog, now)
+        statuses.append(
+            compute_health_status(watchdog.last_advertisement_at, watchdog.consecutive_restart_failures, now)
+        )
+    return watchdog, statuses, now
+
+
+def test_silently_blind_adapter_escalates_to_stuck_instead_of_reporting_ok():
+    start = 1000.0
+    watchdog = WatchdogState(last_advertisement_at=start)
+
+    # 30 minutes of flushes with a cleanly-lying adapter.
+    cycles = int((30 * 60) / FLUSH_INTERVAL_SECONDS)
+    watchdog, statuses, now = _simulate_flush_loop(watchdog, start, cycles, advertisements=False)
+
+    assert statuses[0] == HEALTH_STATUS_OK  # nothing wrong yet -- inside the stall threshold
+    assert HEALTH_STATUS_STALE in statuses  # noticed the gap
+    assert statuses[-1] == HEALTH_STATUS_STUCK  # and escalated, rather than settling back to "ok"
+
+    # The specific old behaviour being locked out: once the watchdog has
+    # noticed the gap, a restart attempt must never flip health back to
+    # "ok" while the adapter is still delivering nothing. (Before the fix
+    # this oscillated ok -> stale -> ok -> stale... forever, and "stuck"
+    # was unreachable.)
+    first_unhealthy = next(i for i, s in enumerate(statuses) if s != HEALTH_STATUS_OK)
+    assert HEALTH_STATUS_OK not in statuses[first_unhealthy:]
+
+    # The published number a human (or ble_auto_reset) reads must be the
+    # real outage duration, not the time since the last restart attempt.
+    payload = json.loads(
+        build_health_payload(watchdog.last_advertisement_at, watchdog.consecutive_restart_failures, now)
+    )
+    assert payload["status"] == HEALTH_STATUS_STUCK
+    assert payload["seconds_since_last_advertisement"] >= 30 * 60 - FLUSH_INTERVAL_SECONDS
+    assert payload["consecutive_restart_failures"] >= STUCK_AFTER_CONSECUTIVE_FAILURES
+
+
+def test_stuck_is_reached_promptly_enough_for_ble_auto_reset_to_act():
+    # ble_auto_reset.py only acts on a "stuck" line within its 5-minute
+    # journal lookback window, so "eventually stuck" isn't good enough.
+    start = 1000.0
+    watchdog = WatchdogState(last_advertisement_at=start)
+    cycles = int((15 * 60) / FLUSH_INTERVAL_SECONDS)
+
+    _, statuses, _ = _simulate_flush_loop(watchdog, start, cycles, advertisements=False)
+
+    assert HEALTH_STATUS_STUCK in statuses
+
+
+def test_restart_that_actually_works_returns_to_ok_and_clears_failures():
+    start = 1000.0
+    watchdog = WatchdogState(last_advertisement_at=start, consecutive_restart_failures=2)
+    cycles = int((15 * 60) / FLUSH_INTERVAL_SECONDS)
+
+    watchdog, statuses, _ = _simulate_flush_loop(watchdog, start, cycles, advertisements=True)
+
+    assert watchdog.consecutive_restart_failures == 0
+    assert statuses[-1] == HEALTH_STATUS_OK
+    assert HEALTH_STATUS_STUCK not in statuses

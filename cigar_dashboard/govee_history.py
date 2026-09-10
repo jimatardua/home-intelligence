@@ -43,6 +43,33 @@ def _entity_id(device_id: str, metric: str) -> str:
 # own True/False interpretation of the "problem" binary_sensor.
 _GAP_STATES = frozenset({"unknown", "unavailable", "none", ""})
 
+# Data-freshness thresholds, the dashboard's own check on whether readings
+# are actually arriving -- deliberately independent of anything the
+# collector says about itself.
+#
+# Why this exists: on 2026-09-09 the collector went blind for 13 hours
+# while publishing `status: "ok"` (a BLE watchdog bug -- see
+# docs/govee-cigar-monitor.md). Every alerting layer keyed off that one
+# self-report, so all of them stayed quiet, and the outage surfaced only as
+# blank readings a human happened to notice. Recorded sample timestamps
+# can't lie the same way: either rows landed in the recorder or they
+# didn't. This is the second, independent signal that failure needed.
+#
+# Both thresholds were measured, not guessed, against 154 hours of real
+# healthy history from these three sensors (all metrics merged per device,
+# since a new row on any metric proves data is flowing): median gap 15s,
+# worst healthy gap 49 minutes on TH01. Simulating both rules minute-by-
+# minute over that window produced zero false alarms.
+#
+# Two thresholds because there are two distinct failures. All three sensors
+# falling silent together is a collector/adapter problem and is
+# individually unlikely enough to flag fast (their gaps are independent --
+# TH03 never exceeded 17 minutes in 7 days). One sensor alone going quiet
+# is that sensor's own problem -- a dead battery, or moved out of BLE range
+# -- and needs the looser threshold to stay above normal per-device gaps.
+DATA_STALE_ALL_DEVICES_SECONDS = 15 * 60
+DATA_STALE_SINGLE_DEVICE_SECONDS = 60 * 60
+
 COLLECTOR_PROBLEM_ENTITY = "binary_sensor.govee_collector_problem"
 COLLECTOR_STATUS_ENTITY = "sensor.govee_collector_status"
 COLLECTOR_STALE_SECONDS_ENTITY = "sensor.govee_collector_seconds_since_last_reading"
@@ -67,6 +94,63 @@ class CollectorHealth:
 class HistoryPoint:
     at_local: datetime
     value: float
+
+
+@dataclass(frozen=True)
+class DataFreshness:
+    """How long since real data actually landed, per device.
+
+    `seconds_since_newest[device_id]` is None when the device has no
+    numeric sample at all in the queried window -- never seen, rather than
+    seen-a-long-time-ago. Both are treated as stale; the distinction is
+    kept because the two mean different things to a human reading it.
+    """
+
+    seconds_since_newest: dict[str, float | None]
+    stale_device_ids: tuple[str, ...]
+    all_devices_stale: bool
+
+    @property
+    def is_problem(self) -> bool:
+        return bool(self.stale_device_ids)
+
+
+def compute_data_freshness(
+    humidity_history: dict[str, list[HistoryPoint]],
+    temp_history: dict[str, list[HistoryPoint]],
+    now_local: datetime,
+) -> DataFreshness:
+    """Staleness per device, from sample timestamps the dashboard already has.
+
+    Pure, and free: it reuses the history already fetched for the charts
+    rather than issuing another query. A new row on *any* metric proves
+    data is flowing for that device, so the newest timestamp across
+    humidity and temperature is what counts -- humidity alone can
+    legitimately hold one value for a while in a stable humidor.
+    """
+    seconds_since_newest: dict[str, float | None] = {}
+    for device_id in DEVICE_IDS:
+        newest = [
+            points[-1].at_local
+            for points in (humidity_history.get(device_id) or [], temp_history.get(device_id) or [])
+            if points
+        ]
+        seconds_since_newest[device_id] = (now_local - max(newest)).total_seconds() if newest else None
+
+    all_devices_stale = all(
+        age is None or age > DATA_STALE_ALL_DEVICES_SECONDS for age in seconds_since_newest.values()
+    )
+    threshold = DATA_STALE_ALL_DEVICES_SECONDS if all_devices_stale else DATA_STALE_SINGLE_DEVICE_SECONDS
+    stale_device_ids = tuple(
+        device_id
+        for device_id in DEVICE_IDS
+        if (age := seconds_since_newest[device_id]) is None or age > threshold
+    )
+    return DataFreshness(
+        seconds_since_newest=seconds_since_newest,
+        stale_device_ids=stale_device_ids,
+        all_devices_stale=all_devices_stale,
+    )
 
 
 def _float_or_none(raw: str | None) -> float | None:
