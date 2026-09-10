@@ -6,6 +6,33 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.50] - 2026-09-09
+
+- Add `custom_components/sensus_analytics/`, a fork of
+  [zestysoft/sensus_analytics_integration](https://github.com/zestysoft/sensus_analytics_integration)
+  (Apache-2.0) vendored and patched to pull water usage from Salt Lake City
+  Public Utilities' Sensus Analytics customer portal
+  (`my-slc.sensus-analytics.com`), matching
+  `custom_components/rocky_mountain_power`'s placement and testing shape.
+  Patches: the setup and options forms' password field was a plaintext
+  `str` (the options form even pre-filled the real password back in as its
+  visible default) -- now a masked `selector.TextSelector`, and the
+  options flow re-validates credentials instead of writing them
+  unvalidated; the same login call was implemented twice against the same
+  endpoint (`aiohttp` in `config_flow.py`, `requests` in
+  `coordinator.py`) -- consolidated into a new `api.py`, now the only file
+  in the package making an HTTP request; a dead `is_matching()` override
+  removed; `update_interval` moved to a named constant and changed from a
+  hardcoded 5 minutes to a documented 30; and the modernization to
+  `entry.runtime_data` incidentally fixed a real bug where changing
+  credentials via the options flow never actually took effect (the old
+  client instance, with old credentials baked in, kept being reused).
+  Added 40 tests (`test_api.py`, `test_sensor.py`, `test_config_flow.py`)
+  where none existed upstream. Full write-up in
+  `docs/sensus-analytics-water.md`. Deployment to `domus` and live
+  verification remain blocked on getting portal credentials from Irina,
+  who is the one who actually uses this site.
+
 ## [1.0.49] - 2026-09-09
 
 - Fix the BLE watchdog reporting `ok` while the collector was completely
