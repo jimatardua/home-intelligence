@@ -19,7 +19,14 @@ from datetime import datetime
 
 from site_shared import nav, theme
 
-from cigar_dashboard.govee_history import DEVICE_IDS, CollectorHealth, DeviceReading, HistoryPoint
+from cigar_dashboard.govee_history import (
+    DEVICE_IDS,
+    DEVICE_LABELS,
+    CollectorHealth,
+    DataFreshness,
+    DeviceReading,
+    HistoryPoint,
+)
 
 # Shown verbatim in the health banner when the collector needs manual
 # attention -- the exact sequence that fixed the one real BlueZ-adapter
@@ -50,6 +57,11 @@ class DashboardContext:
     collector_health: CollectorHealth = field(
         default_factory=lambda: CollectorHealth(is_problem=False, status=None, seconds_since_last_reading=None)
     )
+    data_freshness: DataFreshness = field(
+        default_factory=lambda: DataFreshness(
+            seconds_since_newest={}, stale_device_ids=(), all_devices_stale=False
+        )
+    )
 
 
 def _fmt_pct(v: float | None) -> str:
@@ -60,6 +72,16 @@ def _fmt_temp(v: float | None) -> str:
     return f"{v:.0f}°F" if v is not None else "--"
 
 
+def _fmt_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "ever"  # reads as "no readings ever", the never-seen case
+    minutes = int(seconds // 60)
+    if minutes < 60:
+        return f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"
+
+
 def _history_dict(history: dict[str, list[HistoryPoint]]) -> dict[str, list[dict]]:
     return {
         device_id: [{"t": p.at_local.isoformat(), "v": p.value} for p in points]
@@ -68,6 +90,7 @@ def _history_dict(history: dict[str, list[HistoryPoint]]) -> dict[str, list[dict
 
 
 def _data_dict(ctx: DashboardContext) -> dict:
+    banner = _banner(ctx)
     return {
         "generated_at": ctx.generated_at.isoformat(),
         "devices": {
@@ -87,6 +110,13 @@ def _data_dict(ctx: DashboardContext) -> dict:
             "status": ctx.collector_health.status,
             "seconds_since_last_reading": ctx.collector_health.seconds_since_last_reading,
         },
+        "data_freshness": {
+            "is_problem": ctx.data_freshness.is_problem,
+            "seconds_since_newest": ctx.data_freshness.seconds_since_newest,
+            "stale_device_ids": list(ctx.data_freshness.stale_device_ids),
+            "all_devices_stale": ctx.data_freshness.all_devices_stale,
+        },
+        "banner": {"message": banner.message, "show_fix": banner.show_fix},
     }
 
 
@@ -102,6 +132,63 @@ def _health_message(health: CollectorHealth) -> str:
         age = f"{seconds:.0f}s" if seconds is not None else "a while"
         return f"No fresh reading in {age} -- the collector is retrying automatically."
     return "Collector health unknown -- entity data missing or unavailable."
+
+
+@dataclass(frozen=True)
+class Banner:
+    """What the page's warning banner should say, if anything.
+
+    Built once here, server-side, and carried in `data.json` -- the page's
+    JS just displays it. The message strings used to be written twice, once
+    in Python for first paint and again in the client-side JS for the 60s
+    refetch, which is two places to keep in sync for one piece of text.
+    """
+
+    message: str | None  # None means: nothing wrong, banner hidden
+    show_fix: bool  # whether the manual-reset command block applies
+
+
+def _stale_data_message(ctx: DashboardContext) -> str:
+    freshness = ctx.data_freshness
+    if freshness.all_devices_stale:
+        # The 2026-09-09 case. Lead with what the recorded data proves, and
+        # say plainly that the collector's own claim can't be relied on --
+        # that self-report reading "ok" through a 13-hour outage is exactly
+        # why this check exists.
+        ages = [age for age in freshness.seconds_since_newest.values() if age is not None]
+        age = _fmt_duration(min(ages) if ages else None)
+        claim = ctx.collector_health.status or "nothing"
+        return (
+            f"No new readings from any sensor in {age}, though the collector reports "
+            f'"{claim}" -- trust the data, not the self-check. Reset the BLE adapter on mrteeny:'
+        )
+
+    labels = ", ".join(DEVICE_LABELS.get(d, d) for d in freshness.stale_device_ids)
+    ages = [freshness.seconds_since_newest[d] for d in freshness.stale_device_ids]
+    age = _fmt_duration(min((a for a in ages if a is not None), default=None))
+    plural = "sensors" if len(freshness.stale_device_ids) > 1 else "sensor"
+    return (
+        f"No new readings from {labels} in {age}, while the other {plural} report normally "
+        f"-- check that sensor's battery and its BLE range to mrteeny."
+    )
+
+
+def _banner(ctx: DashboardContext) -> Banner:
+    """Data staleness outranks the collector's self-report.
+
+    Deliberate ordering: sample timestamps in the recorder are evidence,
+    while the collector's health entity is a claim -- and a claim that has
+    been wrong for 13 hours straight (see docs/govee-cigar-monitor.md).
+    When both fire, the concrete one is the more useful thing to read.
+    """
+    if ctx.data_freshness.is_problem:
+        return Banner(
+            message=_stale_data_message(ctx),
+            show_fix=ctx.data_freshness.all_devices_stale,
+        )
+    if ctx.collector_health.is_problem:
+        return Banner(message=_health_message(ctx.collector_health), show_fix=True)
+    return Banner(message=None, show_fix=False)
 
 
 def _device_cards_html(ctx: DashboardContext) -> str:
@@ -124,8 +211,10 @@ def _device_cards_html(ctx: DashboardContext) -> str:
 
 def render_html(ctx: DashboardContext) -> str:
     initial_data = json.dumps(_data_dict(ctx))
-    banner_display = "flex" if ctx.collector_health.is_problem else "none"
-    banner_message = _health_message(ctx.collector_health)
+    banner = _banner(ctx)
+    banner_display = "flex" if banner.message else "none"
+    banner_message = banner.message or ""
+    banner_fix_display = "block" if banner.show_fix else "none"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -175,7 +264,7 @@ h1{{font-size:min(4vw,28px);font-weight:800}}
 
 <div class="health-banner" id="health-banner" style="display:{banner_display}">
   <div class="health-banner-message" id="health-banner-message">{banner_message}</div>
-  <pre class="health-banner-fix" id="health-banner-fix">{RESET_INSTRUCTIONS}</pre>
+  <pre class="health-banner-fix" id="health-banner-fix" style="display:{banner_fix_display}">{RESET_INSTRUCTIONS}</pre>
 </div>
 
 <div class="cards">
@@ -276,22 +365,21 @@ function drawMultiSeries(svgEl, legendEl, histories, devices, unitSuffix) {{
   svgEl.innerHTML = svgHtml;
 }}
 
-function applyHealth(health) {{
+function applyBanner(b) {{
+  // The message text is built server-side (render.py's _banner) and shipped
+  // in data.json, so it lives in exactly one place rather than being
+  // written once in Python for first paint and again here for the refetch.
   const banner = document.getElementById('health-banner');
   const message = document.getElementById('health-banner-message');
-  const isProblem = !health || health.is_problem;
-  banner.style.display = isProblem ? 'flex' : 'none';
-  if (!isProblem) return;
-
-  if (health.status === 'stuck') {{
-    message.textContent = 'BLE scan session appears stuck -- automatic retries have failed. Manual reset needed:';
-  }} else if (health.status === 'stale') {{
-    const seconds = health.seconds_since_last_reading;
-    const age = seconds != null ? Math.round(seconds) + 's' : 'a while';
-    message.textContent = 'No fresh reading in ' + age + ' -- the collector is retrying automatically.';
-  }} else {{
-    message.textContent = 'Collector health unknown -- entity data missing or unavailable.';
-  }}
+  const fix = document.getElementById('health-banner-fix');
+  // A data.json with no banner key at all is itself a problem worth
+  // showing, same "a gap should read as go-check" convention used
+  // everywhere else here -- never silently hide the warning.
+  const text = b ? b.message : 'Dashboard data is missing its status block -- check the generator on domus.';
+  banner.style.display = text ? 'flex' : 'none';
+  if (!text) return;
+  message.textContent = text;
+  fix.style.display = (b && b.show_fix) ? 'block' : 'none';
 }}
 
 let lastData = null;
@@ -300,7 +388,7 @@ function applyData(d) {{
   lastData = d;
   document.getElementById('generated-at').textContent = 'Updated ' + new Date(d.generated_at).toLocaleTimeString([], {{hour: 'numeric', minute: '2-digit'}});
 
-  applyHealth(d.collector_health);
+  applyBanner(d.banner);
 
   Object.entries(d.devices || {{}}).forEach(([id, dev]) => {{
     const humidityEl = document.getElementById('humidity-' + id);

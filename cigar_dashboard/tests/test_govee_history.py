@@ -6,6 +6,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from cigar_dashboard.govee_history import (
+    DEVICE_IDS,
+    HistoryPoint,
+    compute_data_freshness,
     get_collector_health,
     get_current_readings,
     get_humidity_history,
@@ -174,3 +177,114 @@ def test_get_collector_health_treats_unavailable_state_as_problem(conn):
 
     assert health.is_problem is True
     assert health.status is None
+
+
+# --- Data freshness: the dashboard's own check, independent of the -------
+# --- collector's self-report (2026-09-09 blind-collector incident) -------
+
+
+def _points(now: datetime, *ages_seconds: float) -> list[HistoryPoint]:
+    """History points ending `ages_seconds[-1]` before `now`, oldest first."""
+    return [HistoryPoint(at_local=now - timedelta(seconds=age), value=65.0) for age in sorted(ages_seconds, reverse=True)]
+
+
+def _now() -> datetime:
+    return datetime(2026, 9, 9, 17, 0, tzinfo=timezone(timedelta(hours=-6)))
+
+
+def test_all_devices_reporting_recently_is_not_a_problem():
+    now = _now()
+    history = {d: _points(now, 600, 30) for d in DEVICE_IDS}
+
+    freshness = compute_data_freshness(history, history, now)
+
+    assert freshness.is_problem is False
+    assert freshness.stale_device_ids == ()
+    assert freshness.all_devices_stale is False
+    assert freshness.seconds_since_newest["TH01"] == 30
+
+
+def test_all_three_silent_together_is_flagged_at_the_tighter_threshold():
+    # The real incident: every sensor stopped at the same instant. 20
+    # minutes is under the single-device threshold but over the all-devices
+    # one -- three independent sensors going quiet together is not a
+    # coincidence, so it should flag fast.
+    now = _now()
+    age = 20 * 60
+    history = {d: _points(now, age) for d in DEVICE_IDS}
+
+    freshness = compute_data_freshness(history, history, now)
+
+    assert freshness.all_devices_stale is True
+    assert freshness.stale_device_ids == DEVICE_IDS
+    assert freshness.is_problem is True
+
+
+def test_thirteen_hour_outage_is_flagged():
+    now = _now()
+    history = {d: _points(now, 13 * 3600) for d in DEVICE_IDS}
+
+    freshness = compute_data_freshness(history, history, now)
+
+    assert freshness.is_problem is True
+    assert freshness.seconds_since_newest["TH01"] == 13 * 3600
+
+
+def test_one_device_quiet_for_twenty_minutes_is_not_flagged():
+    # A normal per-device gap -- the worst healthy gap measured over 154
+    # hours of real history was 49 minutes. Flagging this would cry wolf.
+    now = _now()
+    history = {d: _points(now, 30) for d in DEVICE_IDS}
+    history["TH01"] = _points(now, 20 * 60)
+
+    freshness = compute_data_freshness(history, history, now)
+
+    assert freshness.all_devices_stale is False
+    assert freshness.stale_device_ids == ()
+    assert freshness.is_problem is False
+
+
+def test_one_device_quiet_past_the_single_device_threshold_is_flagged_alone():
+    now = _now()
+    history = {d: _points(now, 30) for d in DEVICE_IDS}
+    history["TH02"] = _points(now, 70 * 60)
+
+    freshness = compute_data_freshness(history, history, now)
+
+    assert freshness.stale_device_ids == ("TH02",)
+    assert freshness.all_devices_stale is False
+    assert freshness.is_problem is True
+
+
+def test_device_with_no_samples_at_all_is_stale_not_silently_fresh():
+    now = _now()
+    history = {d: _points(now, 30) for d in DEVICE_IDS}
+    history["TH03"] = []
+
+    freshness = compute_data_freshness(history, history, now)
+
+    assert freshness.seconds_since_newest["TH03"] is None
+    assert freshness.stale_device_ids == ("TH03",)
+
+
+def test_a_fresh_temperature_row_proves_the_device_is_alive():
+    # Humidity can legitimately hold one value for a long stretch in a
+    # stable humidor, so freshness takes the newest row across BOTH metrics
+    # -- otherwise a rock-steady wineador would look like a dead sensor.
+    now = _now()
+    humidity = {d: _points(now, 3 * 3600) for d in DEVICE_IDS}
+    temperature = {d: _points(now, 45) for d in DEVICE_IDS}
+
+    freshness = compute_data_freshness(humidity, temperature, now)
+
+    assert freshness.is_problem is False
+    assert freshness.seconds_since_newest["TH01"] == 45
+
+
+def test_missing_device_key_entirely_is_treated_as_never_seen():
+    now = _now()
+
+    freshness = compute_data_freshness({}, {}, now)
+
+    assert all(v is None for v in freshness.seconds_since_newest.values())
+    assert freshness.stale_device_ids == DEVICE_IDS

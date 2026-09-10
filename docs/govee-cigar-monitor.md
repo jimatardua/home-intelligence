@@ -262,6 +262,50 @@ problem too, not silently hidden -- unlike a single sensor reading (where
 job is catching anomalies, so "we can't tell" should read as "go check,"
 not as "everything's fine."
 
+## Dashboard-side data freshness check
+
+Added 2026-09-09, directly because of that day's incident: every warning
+layer built before it keyed off the collector's own health self-report, so
+when that one signal lied, all of them went quiet together. This is the
+independent second opinion that was missing.
+
+`compute_data_freshness()` in `cigar_dashboard/govee_history.py` asks a
+question the collector can't answer wrongly -- *did rows actually land in
+the recorder?* -- using sample timestamps the dashboard already fetched for
+its charts, so it costs no extra query. Two thresholds, because there are
+two distinct failures:
+
+- **All three devices quiet for > 15 minutes** -> a collector/adapter
+  problem. Three sensors falling silent *together* is not coincidence, so
+  this flags fast, and the banner says plainly that the collector's own
+  claim is not to be trusted (quoting it, so a reader who then checks HA
+  and sees `ok` isn't left thinking the dashboard is confused). The
+  BLE-adapter reset commands are shown.
+- **One device quiet for > 60 minutes** while the others report -> that
+  sensor's own problem: a dead battery, or moved out of BLE range. Names
+  the device, and deliberately does *not* show the adapter-reset commands,
+  since resetting hci0 is the wrong advice for a dead coin cell.
+
+**Both thresholds were measured, not guessed.** Against 154 hours of real
+healthy history from these three sensors (humidity and temperature merged
+per device -- a new row on either metric proves the device is alive, and
+humidity alone can legitimately hold one value for a long stretch in a
+stable humidor): median gap 15s, worst healthy per-device gap 49 minutes
+(TH01), and TH03 never exceeded 17 minutes across the whole week.
+Simulating both rules minute-by-minute over that window produced **zero**
+false alarms. Replaying the actual captured incident data through the
+finished check produces the intended banner -- "No new readings from any
+sensor in 12h 49m, though the collector reports \"ok\"" -- which means it
+would have fired at about 04:20 rather than being noticed by a human at
+17:00.
+
+One incidental cleanup came with it: the banner's message strings used to
+be written twice, once in Python for first paint and again in the page's
+client-side JS for the 60-second refetch. The message is now built once in
+`render.py`'s `_banner()`, shipped in `data.json`, and merely displayed by
+the JS -- one source of truth, and a test (`test_page_js_reads_the_prebuilt
+_banner_rather_than_rebuilding_it`) fails if that ever regresses.
+
 ## Preemptive nightly BLE reset
 
 `hci0` wedged into a silent `org.bluez.Error.InProgress` state twice
@@ -425,6 +469,80 @@ just the failure counter) -- 41 tests total for this module, 371 project-
 wide. Deployed and confirmed live against the actual healthy system: ran
 by hand, correctly took no action and did not reboot.
 
+## 2026-09-09: 13 hours blind while health reported "ok"
+
+Found by a human noticing the dashboard's three current readings were
+blank while the graphs still looked fine -- exactly the failure mode every
+layer above was built to make impossible. Worth reading as a unit with the
+2026-08-22 entry: the recovery machinery was all present and correct, and
+none of it fired, because the signal it keys off was lying.
+
+**What happened.** hci0 had been logging `Frame reassembly failed (-84)`
+intermittently since ~02:45. The nightly reset ran at 04:00 into an
+already-degrading adapter and pushed it into the same kernel-level HCI
+lockup as 2026-08-22 (dmesg: `command 0x0c14 tx timeout`, then
+`Opcode 0x0c03 failed: -110` -- a plain HCI Reset timing out, and
+`hciconfig -a` unable even to read the adapter's local name).
+`ble_auto_reset.py` correctly caught the resulting crash-loop and reset at
+04:04, after which the collector came up "active" and stayed that way. All
+12 device entities went `unavailable` at 04:04:54 -- exactly
+`expire_after` (5 min) past the last pre-restart publish -- and stayed
+unavailable for 13 hours. The graphs kept looking healthy because they
+draw a 7-day window, and 13 missing hours at the right edge don't read as
+obviously wrong at a glance.
+
+**Why nothing escalated.** The watchdog's restart path did two things
+wrong, both of which only matter when BlueZ lies:
+
+1. It set `last_advertisement_at = time.time()` whenever `scanner.start()`
+   returned without raising ("give the fresh session a full window"), and
+2. it only incremented `consecutive_restart_failures` when that call
+   actually raised.
+
+In this lockup class every BlueZ call succeeds and no advertisement is
+ever delivered. So every 180 seconds the watchdog noticed the stall,
+"restarted successfully," reset its own staleness clock, and left the
+failure count at zero -- meaning `compute_health_status()` returned `ok`
+at every single flush. `stale` was transient and `stuck` was
+*unreachable*. Downstream, that one lie disabled everything:
+
+- `sensor.govee_collector_seconds_since_last_reading` published ~135, not
+  ~47,000, so the number a human would check looked perfect.
+- `collector.py` only logs `Collector health: X` when the status is *not*
+  `ok`, so it emitted no health lines at all -- which
+  `ble_auto_reset.py` reads, correctly per its own documented rules, as
+  "None + service active = healthy." It logged "No health line, but the
+  service is genuinely active -- clearing all recovery state" every 2
+  minutes for 13 hours, and never escalated to the reboot that would have
+  fixed it in one step.
+- The dashboard's red problem banner never appeared, because
+  `is_problem` was honestly reporting what HA had been told.
+
+**The fix.** An advertisement is now the *only* evidence a restart worked.
+`after_restart_attempt()` never advances `last_advertisement_at` and
+increments the failure count up front, on every attempt; only
+`after_advertisement()` (called from the BLE callback on a real decode)
+clears it. Both known lockup classes are then covered by one rule: the
+noisy one (`start()` raises) and the silent one (`start()` lies). With the
+fix, a blind adapter reaches `stuck` within a few minutes, which logs,
+which `ble_auto_reset.py` acts on, which escalates to a reboot.
+
+**Testability was the actual root cause.** The bug lived in `run()`'s
+loose local variables -- the one part of `collector.py` with no unit tests,
+precisely because it was tangled up with asyncio and bleak, while every
+pure function around it was well covered. The watchdog bookkeeping is now
+a `WatchdogState` value with two pure transitions, following the same
+pattern `apply_advertisement()` already used for device state, so the
+whole failure mode is simulatable with no hardware. Four new tests cover
+it; all four fail against the old logic (verified by reverting the
+transition and re-running), and the blind-adapter simulation reproduces
+the observed symptom exactly: `ok` forever, `stuck` never reached.
+
+**Recovery on the day** was a reboot, again -- `ble_nightly_reset.sh` run
+by hand failed identically to 04:00 (`Can't init device hci0: Connection
+timed out (110)`), confirming the lockup class before escalating. All 3
+sensors were reporting within ~2 minutes of the reboot.
+
 ## Known risks / things to watch
 
 - **The `govee-collector` MQTT login has full, unscoped broker access**,
@@ -477,17 +595,35 @@ by hand, correctly took no action and did not reboot.
   session standing permission to reboot mrteeny.ardua.lan directly for
   interactive diagnosis; that's unrelated to (and not required by) the
   automated script, which already has its own local passwordless sudo.
-- **The reboot escalation is not yet live-tested end to end** (deliberately
-  -- see "Reboot escalation" above for why) -- the individual pieces (the
-  reboot mechanism itself, the detection logic, the timing/backoff state
-  machine) are each independently confirmed, live or via the real captured
-  incident data, but a real kernel-level lockup recurring naturally hasn't
-  yet exercised the full escalate-then-give-up path in production.
+- **The reboot escalation is still not live-tested end to end.** A real
+  kernel-level lockup did recur naturally on 2026-09-09 and did *not*
+  exercise it -- not because the escalation logic is wrong, but because
+  the collector reported `ok` throughout, so nothing ever asked it to run
+  (see "2026-09-09" above). That specific blocker is fixed; the escalate-
+  then-give-up path itself remains unexercised in production, and the next
+  lockup of this class is what will finally test it.
+- **`ble_auto_reset.py` still has no independent signal for "the collector
+  is running but blind."** It infers health from `collector.py`'s log
+  lines plus `systemctl is-active`, and "no health line + active" means
+  healthy -- which was the correct reading of an incorrect signal on
+  2026-09-09. Fixing the signal at the source restores that inference, but
+  the coupling remains: any future bug that stops `collector.py` from
+  logging a bad status is again invisible to the *auto-reset* layer.
+  The dashboard half of this gap is closed -- its freshness check reads
+  recorder timestamps and owes the collector nothing (see "Dashboard-side
+  data freshness check") -- but that only makes an outage *visible*, it
+  doesn't make recovery *automatic*. Giving `ble_auto_reset.py` the same
+  independence (reading the retained `govee/collector/health` topic, or
+  the recorder's entity timestamps over SSH) is the remaining piece, and
+  is deliberately not built yet: mrteeny reaching across to domus for its
+  own health verdict reintroduces exactly the cross-host dependency that
+  script was written to avoid.
 
 ## Status
 
 - [x] `govee_collector/` (decode, discovery, collector, systemd unit,
-      deploy.sh) -- 47 tests passing
+      deploy.sh) -- 52 tests passing (93 for the package as a whole,
+      including `ble_auto_reset.py`'s 41)
 - [x] Mosquitto broker installed, two dedicated logins configured
 - [x] Deployed to mrteeny, verified live via `mosquitto_sub`: all 3
       devices publishing correct discovery config + state
@@ -500,7 +636,7 @@ by hand, correctly took no action and did not reboot.
       failure mode live, ~8h of silent staleness, fixed and redeployed --
       see "Real findings")
 - [x] `cigar_dashboard/` (govee_history, render, generate_dashboard,
-      deploy.sh) -- 23 tests passing
+      deploy.sh) -- 45 tests passing
 - [x] Deployed to domus and verified end-to-end: cron entry live, `/cigars/`
       nginx block added, `ha-proxy` recreated with the new bind mount
       (confirmed `/dashboard/` and `/energy-report/` unaffected), real
@@ -542,6 +678,15 @@ by hand, correctly took no action and did not reboot.
       logs an explicit "ok" line either. `service_is_active()` adds
       `systemctl is-active` as a second, independent signal to
       disambiguate. See "2026-08-22: crash-loop went undetected" above.
+- [x] BLE watchdog no longer trusts a non-raising `scanner.start()` as
+      proof of recovery (2026-09-09 -- 13 hours blind while publishing
+      `ok`); watchdog bookkeeping extracted to a pure `WatchdogState` so
+      the failure is simulatable, 4 regression tests that all fail against
+      the old logic. See "2026-09-09" above.
+- [x] Dashboard-side data freshness check, independent of the collector's
+      self-report -- thresholds measured against 154 hours of real history
+      (zero false alarms), verified by replaying the captured incident
+      data. See "Dashboard-side data freshness check" above.
 - [x] Reboot escalation (41 tests passing for `ble_auto_reset.py`, 371
       project-wide) -- after repeated `hciconfig`-based resets fail,
       escalates to `sudo reboot` (local, same passwordless sudo the

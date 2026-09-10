@@ -6,6 +6,38 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.49] - 2026-09-09
+
+- Fix the BLE watchdog reporting `ok` while the collector was completely
+  blind. A kernel-level HCI lockup on mrteeny left hci0 accepting every
+  BlueZ call while delivering zero advertisements; because `run()` reset
+  `last_advertisement_at` on any `scanner.start()` that didn't raise, and
+  only counted a failure when it did raise, health published `ok` for 13
+  hours -- `stuck` was unreachable, so `ble_auto_reset.py` never escalated
+  and the outage surfaced only as blank readings on `/cigars/` that a
+  human noticed. An advertisement is now the only evidence a restart
+  worked: `after_restart_attempt()` never advances the staleness clock and
+  counts every attempt as a failure until the BLE callback's
+  `after_advertisement()` clears it. The watchdog bookkeeping moved out of
+  `run()`'s untested locals into a `WatchdogState` value with pure
+  transitions (the pattern `apply_advertisement()` already used), which is
+  what made the failure simulatable at all -- 4 new tests, all 4 failing
+  against the old logic (verified by reverting it). Recovery on the day
+  was a reboot, the software reset having failed identically to the
+  nightly one. Full write-up in `docs/govee-cigar-monitor.md`.
+- Add a dashboard-side data freshness check that owes the collector
+  nothing: `compute_data_freshness()` reads the sample timestamps
+  `cigar_dashboard` already fetches for its charts and flags all-devices-
+  quiet at 15 minutes, single-device-quiet at 60 minutes -- two thresholds
+  because a simultaneous silence is an adapter problem while one quiet
+  sensor is a battery or range problem, and the banner gives the right
+  advice for each. Both thresholds measured against 154 hours of real
+  healthy history (zero false alarms in a minute-by-minute simulation),
+  and replaying the captured incident data produces the intended banner,
+  which would have fired at ~04:20 instead of 17:00. Also collapses the
+  banner message strings, previously written once in Python and again in
+  the page's JS, into one server-side source of truth. 16 new tests.
+
 ## [1.0.48] - 2026-08-22
 
 - Add reboot escalation to `ble_auto_reset.py` -- after

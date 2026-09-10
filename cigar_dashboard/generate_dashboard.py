@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from cigar_dashboard.govee_history import (
+    compute_data_freshness,
     get_collector_health,
     get_current_readings,
     get_humidity_history,
@@ -34,12 +35,17 @@ def _build_context(db_path: Path) -> DashboardContext:
     now_local = dt_module.datetime.now().astimezone()
     conn = open_recorder_db(db_path)
 
+    humidity_history = get_humidity_history(conn, now_local)
+    temp_history = get_temp_history(conn, now_local)
+
     return DashboardContext(
         generated_at=now_local,
         readings=get_current_readings(conn),
-        humidity_history=get_humidity_history(conn, now_local),
-        temp_history=get_temp_history(conn, now_local),
+        humidity_history=humidity_history,
+        temp_history=temp_history,
         collector_health=get_collector_health(conn),
+        # Derived from the history already fetched above -- no extra query.
+        data_freshness=compute_data_freshness(humidity_history, temp_history, now_local),
     )
 
 
