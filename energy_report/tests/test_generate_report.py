@@ -16,11 +16,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from energy_report.billing import MonthlyCost
 from energy_report.disaggregation import HourDisaggregation
 from energy_report.generate_report import (
     RMP_HOURS_SINCE_SYNC_ENTITY,
     RMP_SYNC_PROBLEM_ENTITY,
     RMP_SYNC_STATUS_ENTITY,
+    _current_month_snapshot,
     _daily_avg_temps,
     _daily_breakdown,
     _get_rmp_sync_health,
@@ -79,6 +81,60 @@ def test_daily_breakdown_carport_temp_missing_for_a_day_is_none():
     [breakdown] = _daily_breakdown(hours, coverage, daily_temps, carport_daily_temps)
     assert breakdown.avg_outdoor_temp_f == 91.0
     assert breakdown.avg_carport_temp_f is None
+
+
+# --- _current_month_snapshot ---------------------------------------------
+
+
+def _monthly_cost(year: int, month: int, energy_cost: float, customer_charge: float = 12.0) -> MonthlyCost:
+    return MonthlyCost(
+        year=year,
+        month=month,
+        season="summer",
+        total_kwh=100.0,
+        energy_cost_dollars=energy_cost,
+        customer_charge_dollars=customer_charge,
+    )
+
+
+def test_current_month_snapshot_uses_latest_month_not_earliest():
+    # Two months present; the later one (August) must win even though it's
+    # not necessarily "today" in a real run -- see the function's own
+    # docstring on why wall-clock today isn't used.
+    s1_months = [_monthly_cost(2026, 7, energy_cost=27.0), _monthly_cost(2026, 8, energy_cost=9.0)]
+    tou_months = [_monthly_cost(2026, 7, energy_cost=40.0), _monthly_cost(2026, 8, energy_cost=15.0)]
+    coverage = {date(2026, 8, 1): (24, 24), date(2026, 8, 2): (24, 24), date(2026, 7, 15): (24, 24)}
+
+    s1_cost, tou_cost, label, days_observed, days_in_month = _current_month_snapshot(s1_months, tou_months, coverage)
+
+    assert s1_cost == pytest.approx(21.0)  # August only: 9.0 + 12.0 customer charge
+    assert tou_cost == pytest.approx(27.0)  # August only: 15.0 + 12.0 customer charge
+    assert label == "August 2026"
+    assert days_observed == 2
+    assert days_in_month == 31
+
+
+def test_current_month_snapshot_single_day_month_reports_partial_count():
+    s1_months = [_monthly_cost(2026, 9, energy_cost=1.0)]
+    tou_months = [_monthly_cost(2026, 9, energy_cost=2.0)]
+    coverage = {date(2026, 9, 1): (5, 24)}
+
+    _, _, label, days_observed, days_in_month = _current_month_snapshot(s1_months, tou_months, coverage)
+
+    assert label == "September 2026"
+    assert days_observed == 1
+    assert days_in_month == 30
+
+
+def test_current_month_snapshot_ignores_coverage_days_from_other_months():
+    s1_months = [_monthly_cost(2026, 6, energy_cost=5.0), _monthly_cost(2026, 7, energy_cost=5.0)]
+    tou_months = [_monthly_cost(2026, 6, energy_cost=6.0), _monthly_cost(2026, 7, energy_cost=6.0)]
+    coverage = {date(2026, 6, d): (24, 24) for d in range(1, 31)}
+    coverage.update({date(2026, 7, 1): (24, 24), date(2026, 7, 2): (24, 24), date(2026, 7, 3): (24, 24)})
+
+    *_, days_observed, _ = _current_month_snapshot(s1_months, tou_months, coverage)
+
+    assert days_observed == 3
 
 
 # --- _get_rmp_sync_health -----------------------------------------------

@@ -113,6 +113,17 @@ class ReportContext:
         default_factory=lambda: RmpSyncHealth(is_problem=False, status=None, hours_since_last_sync=None)
     )
 
+    # Latest calendar month actually present in the data (not wall-clock
+    # today -- see generate_report.py's _current_month_snapshot()),
+    # unscaled. A second, independent axis from the observed/monthly-
+    # projection/annual-projection tabs below: this toggle is about window
+    # size (cumulative vs. one month), not observed-vs-projected.
+    current_month_schedule1_cost: float = 0.0
+    current_month_tou_cost: float = 0.0
+    current_month_label: str = "No data yet"
+    current_month_days_observed: int = 0
+    current_month_days_in_calendar_month: int = 0
+
 
 def _fmt_money(v: float) -> str:
     sign = "-" if v < 0 else ""
@@ -121,6 +132,55 @@ def _fmt_money(v: float) -> str:
 
 def _fmt_maybe_money(v: float | None) -> str:
     return _fmt_money(v) if v is not None else "N/A"
+
+
+def _diff_card_content(standard_cost: float, tou_cost: float) -> tuple[str, str, str, float]:
+    """(heading, css_class, sub_text, diff) for a standard-vs-TOU diff KPI
+    card. Shared by the cumulative and latest-month KPI panels -- same
+    comparison logic, just a different cost window; the sub-text is
+    generic enough ("over this window") to read correctly for either."""
+    diff = tou_cost - standard_cost
+    if diff > 0:
+        return "Estimated TOU Penalty", "impact-neg", "TOU would have cost this much more over this window", diff
+    if diff < 0:
+        return "Estimated TOU Savings", "impact-pos", "TOU would have saved this much over this window", diff
+    return "No Difference", "", "TOU and standard costs were identical over this window", diff
+
+
+def _kpi_row_html(
+    tab_id: str,
+    active: bool,
+    standard_label: str,
+    standard_cost: float,
+    standard_sub: str,
+    tou_label: str,
+    tou_cost: float,
+    tou_sub: str,
+) -> str:
+    """One three-card KPI panel (standard / TOU / diff), as a tabpanel
+    toggled by the Cumulative/Latest-month buttons above it. Both panels
+    are fully precomputed server-side, same as every other tab on this
+    page -- see this module's docstring on why there's no client-side
+    dollar-amount recomputation anywhere here."""
+    diff_heading, diff_class, diff_sub, diff = _diff_card_content(standard_cost, tou_cost)
+    active_cls = " active" if active else ""
+    return f"""<div class="kpi-row tabpanel{active_cls}" id="{tab_id}" data-scope="cost">
+  <div class="kpi standard">
+    <div class="kpi-label">{standard_label}</div>
+    <div class="kpi-value">{_fmt_money(standard_cost)}</div>
+    <div class="kpi-sub">{standard_sub}</div>
+  </div>
+  <div class="kpi tou">
+    <div class="kpi-label">{tou_label}</div>
+    <div class="kpi-value">{_fmt_money(tou_cost)}</div>
+    <div class="kpi-sub">{tou_sub}</div>
+  </div>
+  <div class="kpi diff">
+    <div class="kpi-label">{diff_heading}</div>
+    <div class="kpi-value {diff_class}">{_fmt_money(abs(diff))}</div>
+    <div class="kpi-sub">{diff_sub}</div>
+  </div>
+</div>"""
 
 
 def _rmp_health_message(health: RmpSyncHealth) -> str:
@@ -209,19 +269,29 @@ def render_report(ctx: ReportContext) -> str:
     )
     seasons_str = ", ".join(sorted(ctx.seasons_observed)) if ctx.seasons_observed else "none"
 
-    diff = ctx.observed_tou_cost - ctx.observed_schedule1_cost
-    if diff > 0:
-        diff_heading = "Estimated TOU Penalty"
-        diff_class = "impact-neg"
-        diff_sub = "TOU would have cost this much more over this window"
-    elif diff < 0:
-        diff_heading = "Estimated TOU Savings"
-        diff_class = "impact-pos"
-        diff_sub = "TOU would have saved this much over this window"
-    else:
-        diff_heading = "No Difference"
-        diff_class = ""
-        diff_sub = "TOU and standard costs were identical over this window"
+    cumulative_kpi_html = _kpi_row_html(
+        tab_id="tab-cost-cumulative",
+        active=True,
+        standard_label="Standard plan (observed)",
+        standard_cost=ctx.observed_schedule1_cost,
+        standard_sub="Exact cost for the hours of data collected so far",
+        tou_label="Time-of-Use (observed)",
+        tou_cost=ctx.observed_tou_cost,
+        tou_sub="Same hours, TOU rates",
+    )
+    month_kpi_html = _kpi_row_html(
+        tab_id="tab-cost-month",
+        active=False,
+        standard_label=f"Standard plan ({ctx.current_month_label})",
+        standard_cost=ctx.current_month_schedule1_cost,
+        standard_sub=(
+            f"{ctx.current_month_days_observed} of {ctx.current_month_days_in_calendar_month} day(s) "
+            "observed -- partial month, not scaled"
+        ),
+        tou_label=f"Time-of-Use ({ctx.current_month_label})",
+        tou_cost=ctx.current_month_tou_cost,
+        tou_sub="Same days, TOU rates",
+    )
 
     summer_monthly = ctx.summer_monthly_projection
     summer_annual = ctx.summer_annual_projection
@@ -275,6 +345,7 @@ header .meta{{font-size:12px;color:rgba(255,255,255,.55)}}
 .tab.active{{background:var(--header);color:#fff}}
 .tabpanel{{display:none}}
 .tabpanel.active{{display:block}}
+.kpi-row.tabpanel.active{{display:grid}}
 .card{{background:var(--card);border-radius:var(--r);padding:18px 22px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:var(--gap)}}
 .card h3{{font-size:14px;font-weight:600;margin-bottom:14px}}
 .chart-wrap{{position:relative;height:260px}}
@@ -312,39 +383,29 @@ footer{{text-align:center;font-size:11px;color:var(--muted);padding:10px 0}}
   tariff effective {ctx.tariff_effective_date.isoformat()}
 </div>
 
-<div class="kpi-row">
-  <div class="kpi standard">
-    <div class="kpi-label">Standard plan (observed)</div>
-    <div class="kpi-value">{_fmt_money(ctx.observed_schedule1_cost)}</div>
-    <div class="kpi-sub">Exact cost for the hours of data collected so far</div>
-  </div>
-  <div class="kpi tou">
-    <div class="kpi-label">Time-of-Use (observed)</div>
-    <div class="kpi-value">{_fmt_money(ctx.observed_tou_cost)}</div>
-    <div class="kpi-sub">Same hours, TOU rates</div>
-  </div>
-  <div class="kpi diff">
-    <div class="kpi-label">{diff_heading}</div>
-    <div class="kpi-value {diff_class}">{_fmt_money(abs(diff))}</div>
-    <div class="kpi-sub">{diff_sub}</div>
-  </div>
+<div class="tabs">
+  <button class="tab active" onclick="setTab('cost','cumulative',this)">Cumulative</button>
+  <button class="tab" onclick="setTab('cost','month',this)">Latest month</button>
 </div>
 
+{cumulative_kpi_html}
+{month_kpi_html}
+
 <div class="tabs">
-  <button class="tab active" onclick="setTab('observed',this)">Observed</button>
-  <button class="tab" onclick="setTab('monthly',this)">Monthly projection</button>
-  <button class="tab" onclick="setTab('annual',this)">Annual projection</button>
+  <button class="tab active" onclick="setTab('projection','observed',this)">Observed</button>
+  <button class="tab" onclick="setTab('projection','monthly',this)">Monthly projection</button>
+  <button class="tab" onclick="setTab('projection','annual',this)">Annual projection</button>
 </div>
 
 <div class="card">
-  <div id="tab-observed" class="tabpanel active">
+  <div id="tab-projection-observed" class="tabpanel active" data-scope="projection">
     <p>Exact cost for the {ctx.day_count} day(s) of data actually collected, zero scaling.
     This is the only number that's unconditionally honest at any data volume.</p>
   </div>
-  <div id="tab-monthly" class="tabpanel">
+  <div id="tab-projection-monthly" class="tabpanel" data-scope="projection">
     {"<p>Standard: " + _fmt_money(summer_monthly[0]) + " &nbsp;·&nbsp; TOU: " + _fmt_money(summer_monthly[1]) + " <span class='muted'>(summer rates, scaled from " + str(ctx.day_count) + " observed day(s) -- early projection)</span></p>" if summer_monthly else "<p class='muted'>" + (winter_projection_note or "Not enough data yet for a monthly projection.") + "</p>"}
   </div>
-  <div id="tab-annual" class="tabpanel">
+  <div id="tab-projection-annual" class="tabpanel" data-scope="projection">
     {"<p>Standard: " + _fmt_money(summer_annual[0]) + " &nbsp;·&nbsp; TOU: " + _fmt_money(summer_annual[1]) + " <span class='muted'>(summer-only projection -- winter months not yet represented)</span></p>" if summer_annual else "<p class='muted'>" + (winter_projection_note or "Not enough data yet for an annual projection.") + "</p>"}
     {"<p class='muted'>" + winter_projection_note + "</p>" if summer_annual and winter_projection_note else ""}
   </div>
@@ -382,11 +443,15 @@ footer{{text-align:center;font-size:11px;color:var(--muted);padding:10px 0}}
 <script>
 const SERIES = {json.dumps(series)};
 
-function setTab(name, btn) {{
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tabpanel').forEach(p => p.classList.remove('active'));
+// Two independent toggle groups live on this page now (cost window, and
+// observed/projection) -- `scope` keeps one group's click from clearing
+// the other's active tab/panel, since querySelectorAll('.tab') alone
+// would match both groups' buttons.
+function setTab(scope, name, btn) {{
+  btn.closest('.tabs').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelectorAll('.tabpanel[data-scope="' + scope + '"]').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + scope + '-' + name).classList.add('active');
 }}
 
 // Chart.js can't consume CSS custom properties directly (canvas, not DOM

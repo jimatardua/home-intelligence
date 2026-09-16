@@ -160,3 +160,88 @@ def test_render_report_baked_in_message_is_accurate_when_ok_even_though_hidden()
 
     assert 'class="health-banner" style="display:none"' in html
     assert "RMP sync is healthy." in html
+
+
+# --- cumulative/latest-month KPI toggle -----------------------------------
+
+
+def test_render_report_includes_both_kpi_panels_with_correct_values():
+    html = render_report(
+        _minimal_ctx(
+            current_month_schedule1_cost=42.0,
+            current_month_tou_cost=50.0,
+            current_month_label="August 2026",
+            current_month_days_observed=5,
+            current_month_days_in_calendar_month=31,
+        )
+    )
+
+    assert "$42.00" in html
+    assert "$50.00" in html
+    assert "Standard plan (August 2026)" in html
+    assert "Time-of-Use (August 2026)" in html
+    assert "5 of 31 day(s) observed -- partial month, not scaled" in html
+
+
+def test_render_report_cumulative_kpi_panel_is_active_by_default_and_month_panel_is_not():
+    html = render_report(_minimal_ctx())
+
+    assert 'id="tab-cost-cumulative" data-scope="cost"' in html
+    assert 'class="kpi-row tabpanel active" id="tab-cost-cumulative"' in html
+    assert 'class="kpi-row tabpanel" id="tab-cost-month"' in html
+
+
+def test_render_report_kpi_toggle_buttons_present():
+    html = render_report(_minimal_ctx())
+
+    assert "onclick=\"setTab('cost','cumulative',this)\">Cumulative</button>" in html
+    assert "onclick=\"setTab('cost','month',this)\">Latest month</button>" in html
+    # "This month" implies wall-clock-current -- the label must stay
+    # honest about possibly showing a lagged month instead (see
+    # generate_report.py's _current_month_snapshot docstring).
+    assert "This month" not in html
+
+
+def test_render_report_projection_tabs_still_present_and_independently_scoped():
+    # The pre-existing Observed/Monthly/Annual toggle must keep working
+    # (and not collide with the new cost-window toggle's ids/scope) after
+    # setTab() was generalized to take a scope argument.
+    html = render_report(_minimal_ctx())
+
+    assert "onclick=\"setTab('projection','observed',this)\">Observed</button>" in html
+    assert "onclick=\"setTab('projection','monthly',this)\">Monthly projection</button>" in html
+    assert "onclick=\"setTab('projection','annual',this)\">Annual projection</button>" in html
+    assert 'id="tab-projection-observed" class="tabpanel active" data-scope="projection"' in html
+
+
+def test_render_report_kpi_grid_css_override_present():
+    html = render_report(_minimal_ctx())
+
+    assert ".kpi-row.tabpanel.active{display:grid}" in html
+
+
+def test_render_report_no_data_yet_shows_default_month_label():
+    ctx = _minimal_ctx(
+        day_count=0,
+        date_range_start=None,
+        date_range_end=None,
+        observed_schedule1_cost=0.0,
+        observed_tou_cost=0.0,
+        current_month_schedule1_cost=0.0,
+        current_month_tou_cost=0.0,
+        current_month_label="No data yet",
+        current_month_days_observed=0,
+        current_month_days_in_calendar_month=0,
+    )
+    html = render_report(ctx)
+
+    assert "Standard plan (No data yet)" in html
+    assert "0 of 0 day(s) observed -- partial month, not scaled" in html
+
+
+def test_render_report_setTab_is_scoped_not_global():
+    html = render_report(_minimal_ctx())
+
+    assert "function setTab(scope, name, btn)" in html
+    assert "btn.closest('.tabs')" in html
+    assert "data-scope=\"' + scope + '\"" in html

@@ -16,6 +16,7 @@ poll just means one fewer/more day of data, never wrong data.
 from __future__ import annotations
 
 import argparse
+import calendar
 import os
 import sys
 from collections import defaultdict
@@ -23,7 +24,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from .archive_loader import coverage_by_date, load_archive
-from .billing import compute_schedule1_cost, compute_tou_cost, total_cost
+from .billing import MonthlyCost, compute_schedule1_cost, compute_tou_cost, total_cost
 from .disaggregation import disaggregate_hour
 from .ha_recorder import (
     get_binary_sensor_intervals,
@@ -111,6 +112,41 @@ def _get_rmp_sync_health(conn) -> RmpSyncHealth:
     )
 
 
+def _current_month_snapshot(
+    schedule1_months: list[MonthlyCost], tou_months: list[MonthlyCost], coverage: dict[date, tuple[int, int]]
+) -> tuple[float, float, str, int, int]:
+    """The most recent calendar month actually present in the data -- not
+    date.today(). RMP sync has gone silently stale for days at a time before
+    (see docs/rmp-integration.md's "Real incident"); using wall-clock today
+    could show a KPI card for a month with zero data instead of the last
+    month that's actually honest. Unscaled, unlike the summer projection
+    tabs below -- this is just `total_cost_dollars` for the latest month,
+    exactly as `total_cost()` sums *all* months for the cumulative KPIs.
+
+    Returns (standard_cost, tou_cost, month_label, days_observed,
+    days_in_calendar_month). Only called when `readings` is non-empty --
+    both month lists always have >=1 entry in that case, since they just
+    group whatever's in `readings` by calendar month.
+    """
+    latest_s1 = schedule1_months[-1]
+    latest_tou = tou_months[-1]
+    # `coverage` is keyed by each reading's own source_date, while
+    # MonthlyCost groups by start_local.year/month -- almost always the
+    # same day, but two different fields (same latent subtlety the
+    # existing summer-projection days_in_month calculation below already
+    # has, not introduced here).
+    days_observed = sum(1 for d in coverage if d.year == latest_s1.year and d.month == latest_s1.month)
+    days_in_calendar_month = calendar.monthrange(latest_s1.year, latest_s1.month)[1]
+    month_label = date(latest_s1.year, latest_s1.month, 1).strftime("%B %Y")
+    return (
+        latest_s1.total_cost_dollars,
+        latest_tou.total_cost_dollars,
+        month_label,
+        days_observed,
+        days_in_calendar_month,
+    )
+
+
 def _maturity_tier(day_count: int, seasons_observed: set[str]) -> str:
     if day_count < DAYS_INSUFFICIENT:
         return "insufficient"
@@ -150,6 +186,11 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
             daily_breakdown=[],
             tariff_effective_date=tariff_for_date(date.today()).effective_start,
             rmp_sync_health=rmp_sync_health,
+            current_month_schedule1_cost=0.0,
+            current_month_tou_cost=0.0,
+            current_month_label="No data yet",
+            current_month_days_observed=0,
+            current_month_days_in_calendar_month=0,
         )
 
     data_as_of = max(r.fetched_at for r in readings)
@@ -176,6 +217,13 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
     observed_tou = total_cost(tou_months)
 
     coverage = coverage_by_date(readings)
+    (
+        current_month_schedule1_cost,
+        current_month_tou_cost,
+        current_month_label,
+        current_month_days_observed,
+        current_month_days_in_calendar_month,
+    ) = _current_month_snapshot(schedule1_months, tou_months, coverage)
     day_count = len(coverage)
     hours_present_total = sum(p for p, _ in coverage.values())
     hours_expected_total = sum(e for _, e in coverage.values())
@@ -242,6 +290,11 @@ def _build_report_context(archive_dir: Path, db_path: Path) -> ReportContext:
         daily_breakdown=daily_breakdown,
         tariff_effective_date=tariff_for_date(date_range_end).effective_start,
         rmp_sync_health=rmp_sync_health,
+        current_month_schedule1_cost=current_month_schedule1_cost,
+        current_month_tou_cost=current_month_tou_cost,
+        current_month_label=current_month_label,
+        current_month_days_observed=current_month_days_observed,
+        current_month_days_in_calendar_month=current_month_days_in_calendar_month,
     )
 
 

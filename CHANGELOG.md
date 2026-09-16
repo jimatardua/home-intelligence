@@ -6,6 +6,25 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.51] - 2026-09-16
+
+- Add a Cumulative/Latest-month toggle to the RMP TOU report's top KPI
+  cards (`energy_report/`), alongside the existing
+  Observed/Monthly-projection/Annual-projection toggle. "Latest month"
+  shows the real, unscaled cost for the most recent calendar month
+  actually present in the archive -- not a projection, and deliberately
+  not tied to wall-clock `date.today()` (RMP sync has gone stale for
+  days before; using the data's own latest month avoids ever showing a
+  KPI card for a month with zero data). New `_current_month_snapshot()`
+  helper in `generate_report.py` reuses the monthly `MonthlyCost` rows
+  `billing.py` already computes for the cumulative KPIs -- just the
+  latest month's row, unscaled. Also fixed a latent bug this surfaced:
+  the page's `setTab()` toggle function operated on `.tab`/`.tabpanel`
+  globally, so a second independent toggle group on the same page would
+  have deactivated the first group's selection on any click; generalized
+  to a scoped `setTab(scope, name, btn)`. 10 new tests; full suite (115)
+  green. See `docs/tou-report.md`'s "Design decisions" section.
+
 ## [1.0.50] - 2026-09-09
 
 - Add `custom_components/sensus_analytics/`, a fork of

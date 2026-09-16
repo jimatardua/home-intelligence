@@ -61,10 +61,24 @@ estimation from usage spikes.
 **Three tiers of claim, not one blended number** -- honest at any data
 volume:
 1. **Observed** -- cost for the exact hours of data collected so far under
-   both plans, zero scaling. Always true regardless of data volume.
+   both plans, zero scaling. Always true regardless of data volume. The
+   top KPI cards themselves have a second, independent toggle for this
+   tier: **Cumulative** (every day ever collected, the original behavior)
+   vs. **Latest month** (the same zero-scaling principle applied to just
+   the most recent calendar month present in the data). "Latest month"
+   deliberately means the newest month actually *in the archive*, not
+   `date.today()` -- RMP sync has gone silently stale for days at a time
+   before (see [rmp-integration.md](rmp-integration.md)'s "Real incident",
+   an 11-day outage caught only by a human noticing), and wall-clock
+   "today" could show a KPI card for a month with zero data if a stale
+   sync straddles a month boundary. Both toggle values are equally
+   unscaled/honest; this toggle only changes the window, not the tier.
 2. **Projection** -- daily-average scaled to month/year, only for a season
    actually observed. Explicitly shows "insufficient winter data" rather
-   than applying winter rates to a summer usage pattern.
+   than applying winter rates to a summer usage pattern. Not to be
+   confused with the "Latest month" KPI view above -- that's the real,
+   unscaled month-to-date number; this tab scales a partial month up to a
+   projected full 30.44-day month.
 3. **Data maturity badge** -- `<14 days` = insufficient, `14-60 days` =
    early/single-season signal, `60+ days spanning both seasons` = real
    seasonal comparison. Same script, stronger output as data accumulates.
