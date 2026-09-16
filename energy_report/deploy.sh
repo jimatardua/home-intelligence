@@ -8,7 +8,7 @@
 # Usage: energy_report/deploy.sh
 set -euo pipefail
 
-HOST="domus"
+HOST="domus.ardua.lan"
 REMOTE_DIR="/opt/home-intelligence/energy_report"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
