@@ -11,12 +11,21 @@
           "account_number": "Account Number",
           "meter_number": "Meter Number",
           "unit_type": "Unit Type (CCF or gal)",
-          "tier1_gallons": "Tier 1 Gallons",
-          "tier1_price": "Tier 1 Price",
-          "tier2_gallons": "Tier 2 Gallons",
-          "tier2_price": "Tier 2 Price",
-          "tier3_price": "Tier 3 Price",
-          "service_fee": "Service Fee"
+          "tier1_gallons": "Tier 1 size (in your Unit Type, e.g. CCF)",
+          "tier1_price": "Tier 1 price (per unit)",
+          "tier2_gallons": "Tier 2 size (in your Unit Type, e.g. CCF)",
+          "tier2_price": "Tier 2 price (per unit)",
+          "tier3_price": "Tier 3 price (per unit)",
+          "service_fee": "Service fee (flat, per billing cycle)"
+        },
+        "data_description": {
+          "unit_type": "The unit the tier sizes and prices below are expressed in. SLC bills in CCF.",
+          "tier1_gallons": "Width of the first price block, in the Unit Type chosen above (despite the field's internal name, not necessarily gallons). Example: 5 for the first 5 CCF.",
+          "tier2_gallons": "Width of the second price block, applied after tier 1. Example: 5 for the next 5 CCF. Usage beyond both blocks is priced at the tier 3 price.",
+          "tier1_price": "Price for one unit of the Unit Type chosen above, e.g. dollars per CCF.",
+          "tier2_price": "Price for one unit in the second block, e.g. dollars per CCF.",
+          "tier3_price": "Price for one unit beyond tier 1 + tier 2, e.g. dollars per CCF.",
+          "service_fee": "Flat fee added once per billing cycle to the Billing Cost sensor."
         }
       }
     },
@@ -40,12 +49,21 @@
           "account_number": "Account Number",
           "meter_number": "Meter Number",
           "unit_type": "Unit Type (CCF or gal)",
-          "tier1_gallons": "Tier 1 Gallons",
-          "tier1_price": "Tier 1 Price",
-          "tier2_gallons": "Tier 2 Gallons",
-          "tier2_price": "Tier 2 Price",
-          "tier3_price": "Tier 3 Price",
-          "service_fee": "Service Fee"
+          "tier1_gallons": "Tier 1 size (in your Unit Type, e.g. CCF)",
+          "tier1_price": "Tier 1 price (per unit)",
+          "tier2_gallons": "Tier 2 size (in your Unit Type, e.g. CCF)",
+          "tier2_price": "Tier 2 price (per unit)",
+          "tier3_price": "Tier 3 price (per unit)",
+          "service_fee": "Service fee (flat, per billing cycle)"
+        },
+        "data_description": {
+          "unit_type": "The unit the tier sizes and prices below are expressed in. SLC bills in CCF.",
+          "tier1_gallons": "Width of the first price block, in the Unit Type chosen above (despite the field's internal name, not necessarily gallons). Example: 5 for the first 5 CCF.",
+          "tier2_gallons": "Width of the second price block, applied after tier 1. Example: 5 for the next 5 CCF. Usage beyond both blocks is priced at the tier 3 price.",
+          "tier1_price": "Price for one unit of the Unit Type chosen above, e.g. dollars per CCF.",
+          "tier2_price": "Price for one unit in the second block, e.g. dollars per CCF.",
+          "tier3_price": "Price for one unit beyond tier 1 + tier 2, e.g. dollars per CCF.",
+          "service_fee": "Flat fee added once per billing cycle to the Billing Cost sensor."
         }
       }
     },

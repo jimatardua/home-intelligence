@@ -6,6 +6,18 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.52] - 2026-10-10
+
+- Sensus Analytics (SLC water) integration deployed to domus and verified
+  against the live portal. Fix the "Last Read" sensor, which read the
+  API's future-dated day-bucket marker `lastRead` instead of
+  `latestReadTime`; add tests using the real captured values. Add
+  `translations/en.json` and relabel the tier fields as being in the
+  selected Unit Type (CCF for SLC) instead of "Gallons", with field
+  descriptions. Record the live findings, recommended SLC configuration
+  and test-environment recipe in `docs/sensus-analytics-water.md`,
+  replacing the "blocked on credentials" section.
+
 ## [1.0.51] - 2026-09-16
 
 - Add a Cumulative/Latest-month toggle to the RMP TOU report's top KPI

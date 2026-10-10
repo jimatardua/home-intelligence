@@ -42,6 +42,16 @@ Full detail in `docs/sensus-analytics-water.md` in this repository. Summary:
    changed from 5 minutes to 30 (Sensus Analytics is documented to update
    far less often than every 5 minutes; the real cadence for this
    specific utility is unconfirmed as of this writing).
+7. **Bug fix (found against SLC's live portal, 2026-10-10)**: the "Last
+   Read" sensor used the API's `lastRead`, a day-bucket marker that lands
+   in the future, instead of `latestReadTime`, which matches the portal's
+   own "Last read at ..." time. Now uses `latestReadTime`; tests use the
+   real captured values.
+8. **Config-flow labels**: added `translations/en.json` (HA reads custom
+   integration form text from there, not `strings.json`), with tier fields
+   relabeled to say they are in the selected Unit Type rather than
+   "Gallons" -- the math runs in whatever unit is configured. Internal
+   keys (`tier1_gallons`, ...) are unchanged so stored entries still load.
 
 Not changed: the core API surface (login endpoint, daily/hourly data
 endpoints, JSON response parsing), the sensor entity set, and the

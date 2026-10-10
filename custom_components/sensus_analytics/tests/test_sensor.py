@@ -18,10 +18,11 @@ for the functions under test, nothing more.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import zoneinfo
 
 from custom_components.sensus_analytics.sensor import (
+    SensusAnalyticsLastReadSensor,
     UsageConversionMixin,
     _current_hour_entry,
     _pricing_config,
@@ -208,3 +209,45 @@ def test_get_usage_unit_prefers_configured_unit():
 def test_get_usage_unit_falls_back_to_api_unit_when_config_unexpected():
     mixin = _MixinUnderTest(_FakeCoordinator({"usageUnit": "CF"}, {"unit_type": "something-else"}))
     assert mixin._get_usage_unit() == "CF"
+
+
+# --- SensusAnalyticsLastReadSensor ------------------------------------------
+# Values below are the real ones captured from SLC's live portal on
+# 2026-10-10: `lastRead` was a day-bucket marker (05:00Z the *next* day, in
+# the future), `latestReadTime` was the true last read (8:00 am Denver, the
+# same time the portal's own "Last read at ..." line showed).
+
+LIVE_LAST_READ_MARKER_MS = 1791694800000  # 2026-10-11T05:00Z -- NOT a read time
+LIVE_LATEST_READ_TIME_MS = 1791640800000  # 2026-10-10T14:00Z == 8:00 am MDT
+
+
+class _FakeEntry:
+    entry_id = "test-entry"
+
+
+def _last_read_sensor(data: dict) -> SensusAnalyticsLastReadSensor:
+    return SensusAnalyticsLastReadSensor(_FakeCoordinator(data, {}), _FakeEntry())
+
+
+def test_last_read_uses_latest_read_time_not_the_day_bucket_marker():
+    sensor = _last_read_sensor(
+        {"lastRead": LIVE_LAST_READ_MARKER_MS, "latestReadTime": LIVE_LATEST_READ_TIME_MS}
+    )
+    assert sensor.native_value == datetime(2026, 10, 10, 14, 0, tzinfo=timezone.utc)
+
+
+def test_last_read_does_not_fall_back_to_the_day_bucket_marker():
+    # A missing latestReadTime must read as "unknown", not silently fall
+    # back to `lastRead` -- that field is a future-dated bucket boundary,
+    # which was the original bug.
+    sensor = _last_read_sensor({"lastRead": LIVE_LAST_READ_MARKER_MS})
+    assert sensor.native_value is None
+
+
+def test_last_read_none_when_latest_read_time_is_zero_or_absent():
+    assert _last_read_sensor({"latestReadTime": 0}).native_value is None
+    assert _last_read_sensor({}).native_value is None
+
+
+def test_last_read_none_for_non_numeric_latest_read_time():
+    assert _last_read_sensor({"latestReadTime": "not-a-number"}).native_value is None

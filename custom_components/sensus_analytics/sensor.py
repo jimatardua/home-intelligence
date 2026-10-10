@@ -272,7 +272,12 @@ class SensusAnalyticsLastReadSensor(StaticUnitSensorBase):
 
     @property
     def native_value(self):
-        last_read_ts = self.coordinator.data.get("lastRead")
+        # `latestReadTime`, not `lastRead`: confirmed against SLC's live
+        # portal that `lastRead` is a day-bucket marker (05:00Z the *next*
+        # day, i.e. in the future), while `latestReadTime` matches the
+        # portal's own "Last read at ..." time. Inherited upstream bug --
+        # never caught because nobody had live data to compare against.
+        last_read_ts = self.coordinator.data.get("latestReadTime")
         if not last_read_ts:
             return None
         try:
