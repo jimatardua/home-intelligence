@@ -21,6 +21,7 @@ class ThemePalette:
     muted: str
     accent: str
     warn: str
+    caution: str
 
 
 # Dark palette reuses home_dashboard/cigar_dashboard's already-tuned values
@@ -30,13 +31,15 @@ class ThemePalette:
 # one brand accent across all three pages, not three competing blues.
 # `warn` gets a real light/dark pair (unlike per-series identity colors,
 # which stay fixed across themes) since it's read as body text/borders,
-# not a fixed data-series color.
-LIGHT = ThemePalette(bg="#f0f2f5", card="#ffffff", text="#212529", muted="#6c757d", accent="#4da3ff", warn="#dc2626")
-DARK = ThemePalette(bg="#0b0e14", card="#161b26", text="#f2f4f8", muted="#8b93a7", accent="#4da3ff", warn="#ef4444")
+# not a fixed data-series color. `caution` is the amber step below `warn`
+# -- "act soon" rather than "something is wrong" (a low battery vs. a dead
+# one); the light value is darkened for contrast on a white card.
+LIGHT = ThemePalette(bg="#f0f2f5", card="#ffffff", text="#212529", muted="#6c757d", accent="#4da3ff", warn="#dc2626", caution="#b45309")
+DARK = ThemePalette(bg="#0b0e14", card="#161b26", text="#f2f4f8", muted="#8b93a7", accent="#4da3ff", warn="#ef4444", caution="#f5a524")
 
 
 def _vars(p: ThemePalette) -> str:
-    return f"--bg:{p.bg};--card:{p.card};--text:{p.text};--muted:{p.muted};--accent:{p.accent};--warn:{p.warn}"
+    return f"--bg:{p.bg};--card:{p.card};--text:{p.text};--muted:{p.muted};--accent:{p.accent};--warn:{p.warn};--caution:{p.caution}"
 
 
 def render_theme_style_block() -> str:

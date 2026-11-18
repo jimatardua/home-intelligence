@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from energy_report.ha_recorder import get_latest_state, get_numeric_sensor_samples
+from site_shared.battery import BatteryStatus, read_battery
 
 DEVICE_IDS: tuple[str, ...] = ("TH01", "TH02", "TH03")
 
@@ -80,7 +81,11 @@ class DeviceReading:
     label: str
     temp_f: float | None
     humidity_pct: float | None
+    # Both from site_shared.battery, so this page and the home dashboard's
+    # battery strip agree. Unlike temp/humidity, battery_pct rides out a
+    # short gap on its last known level (see NOT_REPORTING_GRACE_SECONDS).
     battery_pct: float | None
+    battery_status: str
 
 
 @dataclass(frozen=True)
@@ -162,7 +167,17 @@ def _float_or_none(raw: str | None) -> float | None:
         return None
 
 
-def get_current_readings(conn: sqlite3.Connection) -> dict[str, DeviceReading]:
+def get_battery_statuses(conn: sqlite3.Connection, now_local: datetime) -> dict[str, BatteryStatus]:
+    """Battery level + ok/low/not-reporting status for each of the 3
+    devices, keyed by device id. Public because home_dashboard's battery
+    strip shows these same three alongside the outdoor sensor's."""
+    return {
+        device_id: read_battery(conn, _entity_id(device_id, "battery"), DEVICE_LABELS[device_id], now_local)
+        for device_id in DEVICE_IDS
+    }
+
+
+def get_current_readings(conn: sqlite3.Connection, now_local: datetime) -> dict[str, DeviceReading]:
     """Latest temp/humidity/battery for each of the 3 devices.
 
     A device with no data at all yet (never seen, or HA restarted before its
@@ -171,12 +186,14 @@ def get_current_readings(conn: sqlite3.Connection) -> dict[str, DeviceReading]:
     gap-aware convention used everywhere else in this project (never a
     fabricated value for absent data).
     """
+    batteries = get_battery_statuses(conn, now_local)
     return {
         device_id: DeviceReading(
             label=DEVICE_LABELS[device_id],
             temp_f=_float_or_none(get_latest_state(conn, _entity_id(device_id, "temperature"))),
             humidity_pct=_float_or_none(get_latest_state(conn, _entity_id(device_id, "humidity"))),
-            battery_pct=_float_or_none(get_latest_state(conn, _entity_id(device_id, "battery"))),
+            battery_pct=batteries[device_id].pct,
+            battery_status=batteries[device_id].status,
         )
         for device_id in DEVICE_IDS
     }

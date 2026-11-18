@@ -5,6 +5,7 @@ import json
 import pytest
 
 from govee_collector.collector import (
+    MAX_UNCONFIRMED_BATTERY_STEP,
     FLUSH_INTERVAL_SECONDS,
     HEALTH_STATUS_OK,
     HEALTH_STATUS_STALE,
@@ -325,3 +326,98 @@ def test_restart_that_actually_works_returns_to_ok_and_clears_failures():
     assert watchdog.consecutive_restart_failures == 0
     assert statuses[-1] == HEALTH_STATUS_OK
     assert HEALTH_STATUS_STUCK not in statuses
+
+
+# --- Corrupt-packet filter (battery jump must be confirmed) -----------------
+
+_TH02_MAC = "A4:C1:38:7C:DB:27"
+
+
+def _advertise(state, temp_c: float, humidity_pct: float, battery_pct: int, now: float = 0.0):
+    manufacturer_data = {GOVEE_MANUFACTURER_ID: _payload_bytes(temp_c, humidity_pct, battery_pct)}
+    return apply_advertisement(state, _TH02_MAC, manufacturer_data, rssi=-60, now=now)
+
+
+def test_isolated_zero_battery_packet_never_reaches_published_state():
+    # The real 2026-11-13 Drybox glitch: 32% -> 0% -> 32%, with garbage
+    # temperature/humidity riding along on the corrupt packet.
+    state = _advertise({}, 21.0, 60.0, 32, now=1.0)
+    state = _advertise(state, 13.9, 26.4, 0, now=2.0)
+
+    assert state["TH02"].battery_pct == 32
+    assert state["TH02"].humidity_pct == pytest.approx(60.0)
+    assert state["TH02"].last_seen == 1.0
+    assert json.loads(build_state_payload(state["TH02"]))["battery_pct"] == 32
+
+    state = _advertise(state, 21.0, 60.0, 32, now=3.0)
+
+    assert state["TH02"].battery_pct == 32
+    assert state["TH02"].unconfirmed_battery_pct is None
+    assert state["TH02"].last_seen == 3.0
+
+
+def test_held_packet_still_returns_a_new_dict_so_the_watchdog_sees_an_advertisement():
+    state = _advertise({}, 21.0, 60.0, 87)
+
+    held = _advertise(state, 21.0, 60.0, 62)
+
+    assert held is not state
+    assert held["TH02"].unconfirmed_battery_pct == 62
+
+
+def test_fresh_batteries_are_accepted_on_the_second_agreeing_packet():
+    state = _advertise({}, 21.0, 60.0, 4, now=1.0)
+
+    state = _advertise(state, 21.0, 60.0, 100, now=2.0)
+    assert state["TH02"].battery_pct == 4
+
+    state = _advertise(state, 21.0, 60.0, 100, now=3.0)
+    assert state["TH02"].battery_pct == 100
+    assert state["TH02"].unconfirmed_battery_pct is None
+    assert state["TH02"].last_seen == 3.0
+
+
+def test_two_different_corrupt_packets_in_a_row_do_not_confirm_each_other():
+    state = _advertise({}, 21.0, 60.0, 87)
+    state = _advertise(state, 21.0, 60.0, 0)
+    state = _advertise(state, 21.0, 60.0, 62)
+
+    assert state["TH02"].battery_pct == 87
+    assert state["TH02"].unconfirmed_battery_pct == 62
+
+
+def test_ordinary_discharge_is_never_held_back():
+    state = _advertise({}, 21.0, 60.0, 30)
+    for battery_pct in (29, 30, 28, 25, 17):
+        state = _advertise(state, 21.0, 60.0, battery_pct)
+        assert state["TH02"].battery_pct == battery_pct
+        assert state["TH02"].unconfirmed_battery_pct is None
+
+
+def test_step_exactly_at_the_limit_is_accepted_and_one_past_it_is_held():
+    state = _advertise({}, 21.0, 60.0, 50)
+
+    assert _advertise(state, 21.0, 60.0, 50 - MAX_UNCONFIRMED_BATTERY_STEP)["TH02"].battery_pct == 40
+    assert _advertise(state, 21.0, 60.0, 50 - MAX_UNCONFIRMED_BATTERY_STEP - 1)["TH02"].battery_pct == 50
+
+
+def test_corrupt_first_packet_after_startup_is_corrected_by_the_next_two_real_ones():
+    # Nothing to compare the first packet against, so it is accepted; the
+    # filter must then recover rather than hold the real value out forever.
+    state = _advertise({}, 13.9, 26.4, 0)
+    state = _advertise(state, 21.0, 60.0, 87)
+    assert state["TH02"].battery_pct == 0
+
+    state = _advertise(state, 21.0, 60.0, 87)
+    assert state["TH02"].battery_pct == 87
+
+
+def test_a_held_packet_on_one_sensor_does_not_disturb_another():
+    state = apply_advertisement(
+        {}, "A4:C1:38:CC:28:47", {GOVEE_MANUFACTURER_ID: _payload_bytes(20.0, 65.0, 83)}, rssi=-50
+    )
+    state = _advertise(state, 21.0, 60.0, 87)
+    state = _advertise(state, 21.0, 60.0, 0)
+
+    assert state["TH01"].battery_pct == 83
+    assert state["TH01"].unconfirmed_battery_pct is None

@@ -440,6 +440,71 @@ to return a reading older than 1 hour -- once a car's been asleep that
 long, its last-known temperature would be actively misleading if shown as
 current, so it goes blank instead.
 
+### Battery strip (2026-11-18)
+
+The lone, unlabeled `🔋 100%` in the bottom-right corner (the Eve Weather
+sensor's battery, see "Battery indicator moved to a fixed page corner"
+above) is now a labeled strip across the bottom edge covering every
+battery-powered sensor: **Outdoor** (the Eve), then the three Govee cigar
+sensors, **Wineador / Drybox / Desk**. Same `position:fixed` bottom edge
+as before, so nothing in the page's main flow moved.
+
+Why: the Drybox Govee's batteries died on 2026-11-17 and nothing said so
+ahead of time. Its level was already recorded -- it just wasn't shown
+anywhere anyone looks. This iPad is the screen that gets looked at daily,
+so this strip *is* the low-battery alert; there is deliberately no push
+notification (Home Assistant has no phone registered, only two iPads).
+
+Each battery is in one of three states, decided server-side in
+`site_shared/battery.py` and shipped in `data.json` as
+`batteries: [{label, pct, status}]` plus one `battery_alert:
+{severity, text} | null`. The page only draws what it is given:
+
+| `status` | When | Looks like |
+| --- | --- | --- |
+| `ok` | level above 20% | muted grey, glyph filled to the level |
+| `low` | level at or below 20% | amber + bold; "Replace Drybox batteries" at the left of the strip |
+| `not_reporting` | unavailable for more than 15 minutes, or never seen | red + bold, `--`; "Drybox sensor not reporting" |
+
+Design decisions, each from the real data rather than a guess:
+
+- **20%, not 10%.** On the Drybox's actual discharge (86% -> 4% in two
+  weeks, accelerating at the end) it crossed 30% about 3.4 days before
+  reaching 5%, 20% about 19 hours before, and 10% about 5.5 hours before.
+  10% would have fired mid-morning on the day it died.
+- **"Not reporting" is its own state.** A dead battery doesn't report a
+  low number, it reports nothing -- so a low-battery rule alone goes quiet
+  at exactly the moment it matters. A silent sensor outranks a low one for
+  the strip's single message.
+- **15-minute grace before "not reporting".** The Govee entities go
+  `unavailable` for about a second on every collector BLE reset (nightly
+  at 04:00, plus on-detection resets): 739 of the 758 gaps on record were
+  under a minute, and every one past 15 minutes was a real outage. During
+  the grace period the last known level is still shown
+  (`energy_report.ha_recorder.get_last_numeric_reading`), so the strip
+  doesn't flash red every night.
+- **No hysteresis at the threshold.** A level hovering at 20/21% can flip
+  the item between grey and amber for a while. Left alone on purpose: the
+  discharge is steep enough there (25% -> 20% took 3.5 hours) that it
+  settles quickly, and the fix would be state the generator doesn't keep.
+- **Corrupt readings are stopped at the source**, in the collector, not
+  debounced here -- see docs/govee-cigar-monitor.md, "Corrupt packets".
+
+The amber is a new shared theme token, `--caution` (`site_shared/theme.py`),
+one step below the existing red `--warn`.
+
+**After deploying, the kiosk iPad needs one manual reload.** The page
+re-fetches `data.json` every minute but never reloads `index.html`, and
+the strip's markup/CSS/JS live in `index.html`. Until reloaded, the old
+page shows an empty corner (the `outdoor_battery_pct` field it reads is
+gone from `data.json`).
+
+Cross-package dependency: `home_dashboard/generate_dashboard.py` now
+imports `cigar_dashboard.govee_history.get_battery_statuses` for the
+Govee entity IDs and labels, so `cigar_dashboard/` must be deployed
+alongside it under `/opt/home-intelligence` (it already is), same as
+`energy_report/` and `site_shared/`.
+
 ## Known risks / things to watch
 
 - **A/C + EV usage today is an estimate of exactly those two loads, not

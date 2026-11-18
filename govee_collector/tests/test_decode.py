@@ -62,3 +62,12 @@ def test_decode_minimum_valid_length():
     decoded = decode_h5075(payload)
 
     assert decoded is not None
+
+
+@pytest.mark.parametrize("battery_byte", [101, 191, 193, 197, 215, 255])
+def test_decode_rejects_battery_above_100_percent(battery_byte):
+    # 191/193/197/215 are values these sensors really published -- see
+    # docs/govee-cigar-monitor.md, "Corrupt packets".
+    payload = _encode_payload(temp_c=21.5, humidity_pct=65.2, battery_pct=battery_byte)
+
+    assert decode_h5075(payload) is None

@@ -21,6 +21,7 @@ from datetime import datetime
 import json
 
 from site_shared import nav, theme
+from site_shared.battery import STATUS_LOW, STATUS_NOT_REPORTING, BatteryStatus, battery_alert_message
 from site_shared.theme import DARK as DARK_THEME
 
 from home_dashboard.icons import load_icon_sprite
@@ -95,7 +96,6 @@ class DashboardContext:
     outdoor_temp_f: float | None
     outdoor_humidity_pct: float | None
     condition: str | None  # prettified NWS condition, e.g. "Partly Cloudy"
-    outdoor_battery_pct: float | None  # Eve Weather's own battery level
 
     indoor_temp_f: float | None
     indoor_humidity_pct: float | None
@@ -114,6 +114,7 @@ class DashboardContext:
     forecast_periods: list[ForecastPeriodView] = field(default_factory=list)
     outdoor_temp_history: list[TempHistoryPoint] = field(default_factory=list)
     carport_temp_f: float | None = None  # south side, only while a Tesla's parked there
+    batteries: list[BatteryStatus] = field(default_factory=list)  # bottom strip, in display order
 
 
 # HA's fixed weather-condition enum (homeassistant.components.weather.const)
@@ -183,13 +184,22 @@ def _should_button_up_house(ctx: DashboardContext) -> bool:
     return ctx.outdoor_temp_f > ctx.indoor_temp_f + BUTTON_UP_MARGIN_F
 
 
+def _battery_alert_dict(ctx: DashboardContext) -> dict | None:
+    alert = battery_alert_message(ctx.batteries)
+    if alert is None:
+        return None
+    severity, text = alert
+    return {"severity": severity, "text": text}
+
+
 def _data_dict(ctx: DashboardContext) -> dict:
     return {
         "generated_at": ctx.generated_at.isoformat(),
         "outdoor_temp_f": ctx.outdoor_temp_f,
         "outdoor_humidity_pct": ctx.outdoor_humidity_pct,
         "condition": _prettify_condition(ctx.condition),
-        "outdoor_battery_pct": ctx.outdoor_battery_pct,
+        "batteries": [b.as_dict() for b in ctx.batteries],
+        "battery_alert": _battery_alert_dict(ctx),
         "carport_temp_f": ctx.carport_temp_f,
         "indoor_temp_f": ctx.indoor_temp_f,
         "indoor_humidity_pct": ctx.indoor_humidity_pct,
@@ -310,7 +320,14 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 .outdoor .condition{{font-size:min(3vw,22px);color:var(--muted)}}
 .outdoor .temp-row{{display:flex;align-items:baseline;justify-content:center;gap:min(2vw,14px)}}
 .outdoor .carport-temp{{font-size:min(2.2vw,16px);color:var(--muted)}}
-.battery-corner{{position:fixed;bottom:max(1vh,env(safe-area-inset-bottom));right:max(1vw,env(safe-area-inset-right));font-size:min(1.8vw,13px);color:var(--muted)}}
+.battery-strip{{position:fixed;bottom:max(1vh,env(safe-area-inset-bottom));left:max(2vw,env(safe-area-inset-left));right:max(2vw,env(safe-area-inset-right));display:flex;align-items:center;justify-content:flex-end;font-size:min(1.8vw,13px);color:var(--muted)}}
+.battery-msg{{margin-right:auto;font-weight:700}}
+.battery-item{{display:flex;align-items:center;white-space:nowrap;margin-left:min(2.6vw,22px)}}
+.battery-glyph{{position:relative;box-sizing:border-box;width:1.7em;height:.85em;margin:0 .45em;padding:1px;border:1.5px solid currentColor;border-radius:3px}}
+.battery-glyph::after{{content:"";position:absolute;right:-4px;top:25%;width:2px;height:50%;background:currentColor;border-radius:0 1px 1px 0}}
+.battery-glyph b{{display:block;height:100%;background:currentColor;border-radius:1px}}
+.battery-msg.{STATUS_LOW},.battery-item.{STATUS_LOW}{{color:var(--caution);font-weight:700}}
+.battery-msg.{STATUS_NOT_REPORTING},.battery-item.{STATUS_NOT_REPORTING}{{color:var(--warn);font-weight:700}}
 .hero-stats{{display:flex;gap:6vw}}
 .hero-stats .stat{{text-align:center}}
 .hero-stats .stat-value{{font-size:min(5.6vw,48px);font-weight:800;line-height:1}}
@@ -404,7 +421,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 
 <div class="forecast" id="forecast"></div>
 
-<div class="battery-corner" id="battery"></div>
+<div class="battery-strip" id="battery-strip"></div>
 
 <!-- Silent, looping, muted 2x2px black video -- a pre-Wake-Lock-API trick
      (the same one NoSleep.js uses) for browsers too old for
@@ -479,11 +496,42 @@ function drawSparkline(history) {{
   label.textContent = 'Outdoor temp -- last {OUTDOOR_TEMP_HISTORY_HOURS}h';
 }}
 
+// Bottom strip: one labeled battery per sensor, plus a single message when
+// any is low or silent. ok/low/not_reporting and the message text are
+// decided server-side (site_shared/battery.py) -- this only draws them.
+function renderBatteries(batteries, alert) {{
+  const strip = document.getElementById('battery-strip');
+  strip.innerHTML = '';
+  if (alert) {{
+    const msg = document.createElement('div');
+    msg.className = 'battery-msg ' + alert.severity;
+    msg.textContent = alert.text;
+    strip.appendChild(msg);
+  }}
+  (batteries || []).forEach(b => {{
+    const item = document.createElement('div');
+    item.className = 'battery-item ' + b.status;
+    const label = document.createElement('span');
+    label.textContent = b.label;
+    const glyph = document.createElement('span');
+    glyph.className = 'battery-glyph';
+    const fill = document.createElement('b');
+    fill.style.width = (b.pct != null ? Math.max(0, Math.min(100, b.pct)) : 0) + '%';
+    glyph.appendChild(fill);
+    const pct = document.createElement('span');
+    pct.textContent = b.pct != null ? Math.round(b.pct) + '%' : '--';
+    item.appendChild(label);
+    item.appendChild(glyph);
+    item.appendChild(pct);
+    strip.appendChild(item);
+  }});
+}}
+
 function applyData(d) {{
   document.getElementById('outdoor-temp').textContent = d.outdoor_temp_f != null ? Math.round(d.outdoor_temp_f) + '°' : '--';
   document.getElementById('outdoor-condition').textContent = d.condition || '';
   document.getElementById('carport-temp').textContent = d.carport_temp_f != null ? 'Carport ' + Math.round(d.carport_temp_f) + '°' : '';
-  document.getElementById('battery').textContent = d.outdoor_battery_pct != null ? '🔋 ' + Math.round(d.outdoor_battery_pct) + '%' : '';
+  renderBatteries(d.batteries, d.battery_alert);
 
   const currentPeriod = d.forecast && d.forecast[0];
   document.getElementById('rain-chance').textContent = currentPeriod ? currentPeriod.precip_probability_pct + '%' : '--';

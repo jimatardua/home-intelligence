@@ -22,6 +22,8 @@ SENSORS: dict[str, str] = {
 
 GOVEE_MANUFACTURER_ID = 60552
 
+MAX_BATTERY_PCT = 100
+
 # Sensor id -> human-facing location label, shared by MQTT discovery
 # (device names) and the dashboard.
 DEVICE_LABELS: dict[str, str] = {
@@ -40,11 +42,16 @@ class DecodedReading(NamedTuple):
 def decode_h5075(payload: bytes) -> DecodedReading | None:
     """Decode a Govee H5075 manufacturer-data payload.
 
-    Returns None for a payload too short to contain a real reading, rather
-    than raising -- a truncated/corrupt advertisement should be silently
-    skipped by the caller, not crash the scanner.
+    Returns None for a payload too short to contain a real reading, or one
+    whose battery byte is not a percentage at all, rather than raising -- a
+    truncated/corrupt advertisement should be silently skipped by the
+    caller, not crash the scanner. The battery check is not hypothetical:
+    these sensors were recorded publishing 191, 193, 197 and 215 "percent"
+    (see docs/govee-cigar-monitor.md, "Corrupt packets").
     """
     if len(payload) < 5:
+        return None
+    if payload[4] > MAX_BATTERY_PCT:
         return None
 
     value = int.from_bytes(payload[1:4], byteorder="big")

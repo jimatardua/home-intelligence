@@ -271,6 +271,61 @@ def get_latest_state(conn: sqlite3.Connection, entity_id: str) -> str | None:
     return row[0]
 
 
+@dataclass(frozen=True)
+class LastNumericReading:
+    """An entity's most recent numeric state, and how long it has been
+    silent since.
+
+    `value` survives a trailing gap: it is the last real number recorded,
+    even if "unavailable"/"unknown" rows follow it. None only when the
+    entity has never recorded a number at all.
+
+    `gap_seconds` is how long the entity has been in that trailing gap --
+    measured from the first gap row after `value`, i.e. from when it went
+    quiet, not from the last time its value happened to change. None when
+    the latest state is itself numeric (no gap), or when there is no state
+    at all.
+    """
+
+    value: float | None
+    gap_seconds: float | None
+
+
+def get_last_numeric_reading(conn: sqlite3.Connection, entity_id: str, now: datetime) -> LastNumericReading:
+    """Unlike get_latest_state(), which collapses "currently unavailable" to
+    None and so can't tell a one-second blip from a sensor that died last
+    week, this keeps both halves: the last good value and the age of the
+    gap. A caller can then ride out a short gap on the last good value and
+    still report a long one honestly.
+    """
+    metadata_id = _metadata_id(conn, entity_id)
+    if metadata_id is None:
+        return LastNumericReading(value=None, gap_seconds=None)
+
+    placeholders = ",".join("?" for _ in _GAP_STATES)
+    numeric_row = conn.execute(
+        f"SELECT state, last_updated_ts FROM states WHERE metadata_id = ? "
+        f"AND lower(state) NOT IN ({placeholders}) ORDER BY last_updated_ts DESC LIMIT 1",
+        (metadata_id, *sorted(_GAP_STATES)),
+    ).fetchone()
+
+    value: float | None = None
+    value_ts = float("-inf")
+    if numeric_row is not None:
+        value_ts = numeric_row[1]
+        try:
+            value = float(numeric_row[0])
+        except ValueError:
+            value = None
+
+    gap_started_ts = conn.execute(
+        "SELECT MIN(last_updated_ts) FROM states WHERE metadata_id = ? AND last_updated_ts > ?",
+        (metadata_id, value_ts),
+    ).fetchone()[0]
+    gap_seconds = None if gap_started_ts is None else max(0.0, now.timestamp() - gap_started_ts)
+    return LastNumericReading(value=value, gap_seconds=gap_seconds)
+
+
 def get_latest_attributes(conn: sqlite3.Connection, entity_id: str) -> dict:
     """The most recent full attributes dict for any entity, or {}.
 

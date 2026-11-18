@@ -543,6 +543,59 @@ by hand failed identically to 04:00 (`Can't init device hci0: Connection
 timed out (110)`), confirming the lockup class before escalating. All 3
 sensors were reporting within ~2 minutes of the reboot.
 
+## Corrupt packets and battery status (2026-11-18)
+
+Found while building the low-battery indicator (docs/home-dashboard.md,
+"Battery strip"), after the Drybox's batteries died on 2026-11-17.
+
+**All three sensors occasionally publish one corrupt packet.** 16 are on
+record between 2026-08-07 and 2026-11-17, every one lasting exactly one
+15-second publish interval before the next good packet replaced it:
+
+- battery `0` on a sensor sitting at 81-100% (10 times), or `62` (twice),
+  or an impossible `191`/`193`/`197`/`215` (4 times);
+- often garbage temperature/humidity in the same packet (e.g. Wineador
+  55.8°F / 9.6% RH), and often a nonsense RSSI (`2`, `4`, `39`, `62` --
+  positive dBm) -- but not always, so RSSI alone can't be the test.
+
+The real count is certainly higher: only a corrupt packet that happens to
+be the latest one at a publish tick is ever recorded. The root cause is
+not established (no raw payload has been captured); the filter below
+doesn't depend on knowing it.
+
+Why it matters now: a single `0%` would have tripped any low-battery
+rule, and the garbage humidity values were already landing in the charts.
+
+Two guards, both in the collector so that everything downstream (HA,
+both dashboards, the recorder history) sees clean data:
+
+1. `decode.py` rejects any payload whose battery byte is above 100.
+2. `collector.py`'s `apply_advertisement()` holds back a packet whose
+   battery level differs from the last accepted one by more than
+   `MAX_UNCONFIRMED_BATTERY_STEP` (10) and applies it only if the very
+   next packet from that sensor agrees with it. An isolated corrupt
+   packet therefore never reaches MQTT at all -- including its garbage
+   temperature/humidity -- while a real jump (fresh batteries, 4% ->
+   100%) lands one packet (a couple of seconds) late. The smallest
+   recorded corrupt jump was 25 points; genuine discharge never moved
+   more than a point or two between packets.
+
+A held packet still counts as an advertisement for the stall watchdog --
+the radio demonstrably delivered something -- so this cannot cause a
+false `stale`.
+
+**Battery status on the cards.** Each card's "Battery NN%" line now turns
+amber at or below 20% and red with `--` when the sensor has stopped
+reporting, using the same `site_shared/battery.py` rules as the home
+dashboard's strip, so the two pages cannot disagree. One visible
+difference from temperature/humidity on the same card: the battery level
+rides out a gap of up to 15 minutes on its last known value instead of
+going to `--` immediately.
+
+**H5075 battery curve, for next time:** the level is not linear. The
+Drybox sat between 86% and 100% for three months, then went 86% -> 34% in
+ten days and 34% -> 4% in four more.
+
 ## Known risks / things to watch
 
 - **The `govee-collector` MQTT login has full, unscoped broker access**,

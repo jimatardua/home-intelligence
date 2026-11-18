@@ -6,6 +6,31 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.53] - 2026-11-18
+
+- Low-battery indicator for the battery-powered sensors, prompted by the
+  Drybox Govee's batteries dying unannounced on 2026-11-17. The home
+  dashboard's lone bottom-right `🔋 100%` (outdoor Eve sensor only) is
+  now a labeled strip -- Outdoor, Wineador, Drybox, Desk -- that turns a
+  sensor amber at or below 20% ("Replace Drybox batteries") and red when
+  it has stopped reporting for more than 15 minutes ("Drybox sensor not
+  reporting"), since a dead battery reports nothing rather than a low
+  number. The cigar dashboard's cards colour their battery line by the
+  same rules. Threshold and grace period are both measured from the
+  recorder, not guessed (20% gave about 19 hours' notice on the Drybox's
+  real discharge curve; 10% would have given 5.5). New shared
+  `site_shared/battery.py`, `energy_report.ha_recorder
+  .get_last_numeric_reading()`, and an amber `--caution` theme token.
+- `govee_collector` now drops the corrupt packets all three sensors
+  occasionally emit (16 on record: battery 0/62/191-215 for one publish
+  interval, often with garbage temperature/humidity): `decode.py` rejects
+  a battery byte above 100, and `apply_advertisement()` holds back any
+  battery jump of more than 10 points until the next packet confirms it.
+- 49 new test cases; all suites green. The kiosk iPad needs one manual reload
+  to pick up the new strip. See `docs/home-dashboard.md` ("Battery
+  strip") and `docs/govee-cigar-monitor.md` ("Corrupt packets and battery
+  status").
+
 ## [1.0.52] - 2026-10-10
 
 - Sensus Analytics (SLC water) integration deployed to domus and verified

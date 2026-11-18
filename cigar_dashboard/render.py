@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from site_shared import nav, theme
+from site_shared.battery import STATUS_LOW, STATUS_NOT_REPORTING
 
 from cigar_dashboard.govee_history import (
     DEVICE_IDS,
@@ -99,6 +100,7 @@ def _data_dict(ctx: DashboardContext) -> dict:
                 "temp_f": r.temp_f,
                 "humidity_pct": r.humidity_pct,
                 "battery_pct": r.battery_pct,
+                "battery_status": r.battery_status,
                 "color": DEVICE_COLORS[device_id],
             }
             for device_id, r in ctx.readings.items()
@@ -203,7 +205,7 @@ def _device_cards_html(ctx: DashboardContext) -> str:
   <div class="humidity" id="humidity-{device_id}">{_fmt_pct(r.humidity_pct if r else None)}</div>
   <div class="sub">Humidity</div>
   <div class="temp" id="temp-{device_id}">{_fmt_temp(r.temp_f if r else None)}</div>
-  <div class="battery" id="battery-{device_id}">Battery {_fmt_pct(r.battery_pct if r else None)}</div>
+  <div class="battery {r.battery_status if r else STATUS_NOT_REPORTING}" id="battery-{device_id}">Battery {_fmt_pct(r.battery_pct if r else None)}</div>
 </div>"""
         )
     return "\n".join(cards)
@@ -238,6 +240,8 @@ h1{{font-size:min(4vw,28px);font-weight:800}}
 .card .sub{{font-size:12px;color:var(--muted);margin-bottom:10px}}
 .card .temp{{font-size:min(3.4vw,24px);font-weight:700}}
 .card .battery{{font-size:13px;color:var(--muted);margin-top:6px}}
+.card .battery.{STATUS_LOW}{{color:var(--caution);font-weight:700}}
+.card .battery.{STATUS_NOT_REPORTING}{{color:var(--warn);font-weight:700}}
 .chart-card{{background:var(--card);border-radius:var(--r);padding:2vh 2vw}}
 .chart-card.humidity-chart svg{{height:26vh}}
 .chart-card.temp-chart svg{{height:16vh}}
@@ -396,7 +400,10 @@ function applyData(d) {{
     const tempEl = document.getElementById('temp-' + id);
     if (tempEl) tempEl.textContent = dev.temp_f != null ? Math.round(dev.temp_f) + '°F' : '--';
     const batteryEl = document.getElementById('battery-' + id);
-    if (batteryEl) batteryEl.textContent = 'Battery ' + (dev.battery_pct != null ? Math.round(dev.battery_pct) + '%' : '--');
+    if (batteryEl) {{
+      batteryEl.textContent = 'Battery ' + (dev.battery_pct != null ? Math.round(dev.battery_pct) + '%' : '--');
+      batteryEl.className = 'battery ' + (dev.battery_status || '');
+    }}
   }});
 
   drawMultiSeries(document.getElementById('humidity-svg'), document.getElementById('humidity-legend'), d.humidity_history || {{}}, d.devices || {{}}, '%');

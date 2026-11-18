@@ -43,7 +43,15 @@ site_shared/
   theme.py   -- light/dark palettes, CSS custom-property block, FOUC-avoiding
                 bootstrap script, and a "watch for OS scheme changes" script
   nav.py     -- shared top nav bar (links + optional light/dark/auto toggle)
+  battery.py -- ok / low / not-reporting status for battery-powered sensors,
+                shared by home_dashboard's battery strip and cigar_dashboard's
+                cards (see docs/home-dashboard.md, "Battery strip")
 ```
+
+`battery.py` is the one module here that isn't pure presentation: it reads
+the recorder (via `energy_report.ha_recorder`), because the threshold, the
+grace period and the wording all have to be identical on both pages, and
+this is the only package both already import.
 
 ### Theming
 
@@ -62,7 +70,9 @@ three competing blues). `warn` gets a real light/dark pair
 (`#dc2626`/`#ef4444`), unlike per-series identity colors (Govee device
 colors, energy chart dataset colors), which stay fixed across themes on
 purpose -- brand/series colors staying constant while only neutrals swap
-is normal, defensible practice.
+is normal, defensible practice. `caution` (`#b45309`/`#f5a524`, added
+2026-11-18) is the amber step below `warn` -- "act soon" rather than
+"something is wrong"; currently used only for low batteries.
 
 ### Auto-only theming (no manual toggle)
 

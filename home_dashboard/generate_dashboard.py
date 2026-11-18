@@ -16,6 +16,7 @@ from pathlib import Path
 
 import datetime as dt_module
 
+from cigar_dashboard.govee_history import get_battery_statuses
 from energy_report.ha_recorder import get_latest_attributes, get_latest_state, open_recorder_db
 from home_dashboard.forecast import ForecastError, get_forecast_periods
 from home_dashboard.render import (
@@ -35,10 +36,12 @@ from home_dashboard.temp_history import (
     get_recent_outdoor_temps,
 )
 from home_dashboard.usage_today import get_usage_today
+from site_shared.battery import BatteryStatus, read_battery
 
 OUTDOOR_TEMP_ENTITY = "sensor.eve_weather_20ebs9901_temperature"
 OUTDOOR_HUMIDITY_ENTITY = "sensor.eve_weather_20ebs9901_humidity"
 OUTDOOR_BATTERY_ENTITY = "sensor.eve_weather_20ebs9901_battery"
+OUTDOOR_BATTERY_LABEL = "Outdoor"
 NWS_WEATHER_ENTITY = "weather.nws_40_73657574787062_111_81042551994325_kslc"
 CLIMATE_ENTITY = "climate.family_room_family_room"
 
@@ -80,6 +83,16 @@ def _load_previous_forecast(output_dir: Path) -> list[ForecastPeriodView]:
         return []
 
 
+def get_batteries(conn, now_local: dt_module.datetime) -> list[BatteryStatus]:
+    """Every battery-powered sensor the strip shows, in display order: the
+    outdoor Eve Weather first (where the lone battery readout used to be),
+    then the three Govee cigar sensors."""
+    return [
+        read_battery(conn, OUTDOOR_BATTERY_ENTITY, OUTDOOR_BATTERY_LABEL, now_local),
+        *get_battery_statuses(conn, now_local).values(),
+    ]
+
+
 def _build_context(db_path: Path, output_dir: Path) -> DashboardContext:
     now_local = dt_module.datetime.now().astimezone()
     conn = open_recorder_db(db_path)
@@ -109,7 +122,7 @@ def _build_context(db_path: Path, output_dir: Path) -> DashboardContext:
     except ForecastError:
         forecast_periods = _load_previous_forecast(output_dir)
 
-    outdoor_battery_pct = _float_or_none(get_latest_state(conn, OUTDOOR_BATTERY_ENTITY))
+    batteries = get_batteries(conn, now_local)
     temp_history = [
         TempHistoryPoint(at_local=p.at_local, temp_f=p.temp_f)
         for p in get_recent_outdoor_temps(conn, now_local, hours=OUTDOOR_TEMP_HISTORY_HOURS)
@@ -121,7 +134,7 @@ def _build_context(db_path: Path, output_dir: Path) -> DashboardContext:
         outdoor_temp_f=outdoor_temp_f,
         outdoor_humidity_pct=outdoor_humidity_pct,
         condition=condition,
-        outdoor_battery_pct=outdoor_battery_pct,
+        batteries=batteries,
         indoor_temp_f=_float_or_none(climate_attrs.get("current_temperature")),
         indoor_humidity_pct=_float_or_none(climate_attrs.get("current_humidity")),
         hvac_mode=hvac_mode,

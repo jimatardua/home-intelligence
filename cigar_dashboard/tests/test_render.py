@@ -19,9 +19,9 @@ def _minimal_context(**overrides) -> DashboardContext:
     defaults = dict(
         generated_at=datetime(2026, 8, 7, 12, 0, tzinfo=LOCAL_TZ),
         readings={
-            "TH01": DeviceReading(label="Wineador", temp_f=68.5, humidity_pct=65.2, battery_pct=92),
-            "TH02": DeviceReading(label="Drybox", temp_f=70.1, humidity_pct=45.0, battery_pct=88),
-            "TH03": DeviceReading(label="Desk", temp_f=74.3, humidity_pct=38.0, battery_pct=95),
+            "TH01": DeviceReading(label="Wineador", temp_f=68.5, humidity_pct=65.2, battery_pct=92, battery_status="ok"),
+            "TH02": DeviceReading(label="Drybox", temp_f=70.1, humidity_pct=45.0, battery_pct=88, battery_status="ok"),
+            "TH03": DeviceReading(label="Desk", temp_f=74.3, humidity_pct=38.0, battery_pct=95, battery_status="ok"),
         },
         humidity_history={},
         temp_history={},
@@ -55,9 +55,9 @@ def test_data_json_carries_a_stable_color_per_device():
 def test_data_json_missing_device_reading_is_none_not_fabricated():
     ctx = _minimal_context(
         readings={
-            "TH01": DeviceReading(label="Wineador", temp_f=None, humidity_pct=None, battery_pct=None),
-            "TH02": DeviceReading(label="Drybox", temp_f=70.1, humidity_pct=45.0, battery_pct=88),
-            "TH03": DeviceReading(label="Desk", temp_f=74.3, humidity_pct=38.0, battery_pct=95),
+            "TH01": DeviceReading(label="Wineador", temp_f=None, humidity_pct=None, battery_pct=None, battery_status="not_reporting"),
+            "TH02": DeviceReading(label="Drybox", temp_f=70.1, humidity_pct=45.0, battery_pct=88, battery_status="ok"),
+            "TH03": DeviceReading(label="Desk", temp_f=74.3, humidity_pct=38.0, battery_pct=95, battery_status="ok"),
         }
     )
 
@@ -88,9 +88,9 @@ def test_data_json_history_shape():
 def test_render_html_shows_missing_reading_as_dashes():
     ctx = _minimal_context(
         readings={
-            "TH01": DeviceReading(label="Wineador", temp_f=None, humidity_pct=None, battery_pct=None),
-            "TH02": DeviceReading(label="Drybox", temp_f=70.1, humidity_pct=45.0, battery_pct=88),
-            "TH03": DeviceReading(label="Desk", temp_f=74.3, humidity_pct=38.0, battery_pct=95),
+            "TH01": DeviceReading(label="Wineador", temp_f=None, humidity_pct=None, battery_pct=None, battery_status="not_reporting"),
+            "TH02": DeviceReading(label="Drybox", temp_f=70.1, humidity_pct=45.0, battery_pct=88, battery_status="ok"),
+            "TH03": DeviceReading(label="Desk", temp_f=74.3, humidity_pct=38.0, battery_pct=95, battery_status="ok"),
         }
     )
 
@@ -369,3 +369,42 @@ def test_page_js_reads_the_prebuilt_banner_rather_than_rebuilding_it():
 
     assert "applyBanner(d.banner)" in html
     assert "automatic retries have failed" not in html.split("<script>")[-1]
+
+
+# --- Battery status on the cards ---------------------------------------------
+
+
+def _context_with_drybox_battery(battery_pct, battery_status) -> DashboardContext:
+    readings = dict(_minimal_context().readings)
+    readings["TH02"] = DeviceReading(
+        label="Drybox", temp_f=70.1, humidity_pct=45.0, battery_pct=battery_pct, battery_status=battery_status
+    )
+    return _minimal_context(readings=readings)
+
+
+def test_data_json_carries_battery_status_per_device():
+    data = json.loads(render_data_json(_context_with_drybox_battery(17.0, "low")))
+
+    assert data["devices"]["TH02"]["battery_status"] == "low"
+    assert data["devices"]["TH01"]["battery_status"] == "ok"
+
+
+def test_low_battery_card_gets_the_low_class_and_others_do_not():
+    html = render_html(_context_with_drybox_battery(17.0, "low"))
+
+    assert '<div class="battery low" id="battery-TH02">Battery 17%</div>' in html
+    assert '<div class="battery ok" id="battery-TH01">Battery 92%</div>' in html
+
+
+def test_dead_sensor_card_gets_the_not_reporting_class_and_a_dash():
+    html = render_html(_context_with_drybox_battery(None, "not_reporting"))
+
+    assert '<div class="battery not_reporting" id="battery-TH02">Battery --</div>' in html
+
+
+def test_card_styles_cover_both_alert_states_and_the_refresh_script_keeps_them_current():
+    html = render_html(_minimal_context())
+
+    assert ".card .battery.low{color:var(--caution)" in html
+    assert ".card .battery.not_reporting{color:var(--warn)" in html
+    assert "batteryEl.className = 'battery ' + (dev.battery_status || '')" in html

@@ -20,6 +20,7 @@ from energy_report.ha_recorder import (
     get_current_gated_temperature,
     get_device_tracker_zone_intervals,
     get_gated_temperature_samples,
+    get_last_numeric_reading,
     get_latest_attributes,
     get_latest_state,
     get_numeric_sensor_samples,
@@ -531,3 +532,82 @@ def test_current_gated_temperature_custom_max_age(conn):
         )
         is None
     )
+
+
+# --- get_last_numeric_reading ------------------------------------------------
+
+
+def test_last_numeric_reading_with_no_gap(conn):
+    _add_entity(conn, 1, "sensor.battery")
+    _add_state(conn, 1, "83", _dt(9))
+    _add_state(conn, 1, "82", _dt(10))
+
+    reading = get_last_numeric_reading(conn, "sensor.battery", _dt(12))
+
+    assert reading.value == 82.0
+    assert reading.gap_seconds is None
+
+
+def test_last_numeric_reading_keeps_the_last_value_through_a_trailing_gap(conn):
+    _add_entity(conn, 1, "sensor.battery")
+    _add_state(conn, 1, "17", _dt(9))
+    _add_state(conn, 1, "unavailable", _dt(10))
+
+    reading = get_last_numeric_reading(conn, "sensor.battery", _dt(10, 20))
+
+    assert reading.value == 17.0
+    assert reading.gap_seconds == 20 * 60
+
+
+def test_last_numeric_reading_measures_the_gap_from_when_it_started_not_its_latest_row(conn):
+    # unavailable -> unknown (e.g. an HA restart mid-outage) is still one
+    # gap, and it began at the first of those rows.
+    _add_entity(conn, 1, "sensor.battery")
+    _add_state(conn, 1, "17", _dt(8))
+    _add_state(conn, 1, "unavailable", _dt(9))
+    _add_state(conn, 1, "unknown", _dt(11))
+
+    reading = get_last_numeric_reading(conn, "sensor.battery", _dt(12))
+
+    assert reading.gap_seconds == 3 * 3600
+
+
+def test_last_numeric_reading_ignores_gaps_that_ended(conn):
+    _add_entity(conn, 1, "sensor.battery")
+    _add_state(conn, 1, "90", _dt(8))
+    _add_state(conn, 1, "unavailable", _dt(9))
+    _add_state(conn, 1, "90", _dt(9, 1))
+
+    reading = get_last_numeric_reading(conn, "sensor.battery", _dt(12))
+
+    assert reading.value == 90.0
+    assert reading.gap_seconds is None
+
+
+def test_last_numeric_reading_for_an_entity_that_has_only_ever_been_a_gap(conn):
+    _add_entity(conn, 1, "sensor.battery")
+    _add_state(conn, 1, "unavailable", _dt(9))
+
+    reading = get_last_numeric_reading(conn, "sensor.battery", _dt(10))
+
+    assert reading.value is None
+    assert reading.gap_seconds == 3600
+
+
+def test_last_numeric_reading_for_unknown_entity_and_for_entity_with_no_states(conn):
+    _add_entity(conn, 1, "sensor.battery")
+
+    for entity_id in ("sensor.battery", "sensor.never_registered"):
+        reading = get_last_numeric_reading(conn, entity_id, _dt(10))
+        assert reading.value is None
+        assert reading.gap_seconds is None
+
+
+def test_last_numeric_reading_treats_a_non_numeric_state_as_no_value(conn):
+    _add_entity(conn, 1, "sensor.battery")
+    _add_state(conn, 1, "charging", _dt(9))
+
+    reading = get_last_numeric_reading(conn, "sensor.battery", _dt(10))
+
+    assert reading.value is None
+    assert reading.gap_seconds is None

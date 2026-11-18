@@ -9,6 +9,7 @@ from cigar_dashboard.govee_history import (
     DEVICE_IDS,
     HistoryPoint,
     compute_data_freshness,
+    get_battery_statuses,
     get_collector_health,
     get_current_readings,
     get_humidity_history,
@@ -49,7 +50,7 @@ def test_get_current_readings_all_three_devices(conn):
     _add_entity(conn, 3, "sensor.wineador_th01_battery")
     _add_state(conn, 3, "92", now)
 
-    readings = get_current_readings(conn)
+    readings = get_current_readings(conn, now)
 
     assert readings["TH01"].label == "Wineador"
     assert readings["TH01"].temp_f == pytest.approx(68.5)
@@ -66,7 +67,7 @@ def test_get_current_readings_treats_gap_state_as_none(conn):
     _add_entity(conn, 1, "sensor.drybox_th02_humidity")
     _add_state(conn, 1, "unavailable", now)
 
-    readings = get_current_readings(conn)
+    readings = get_current_readings(conn, now)
 
     assert readings["TH02"].humidity_pct is None
 
@@ -288,3 +289,44 @@ def test_missing_device_key_entirely_is_treated_as_never_seen():
 
     assert all(v is None for v in freshness.seconds_since_newest.values())
     assert freshness.stale_device_ids == DEVICE_IDS
+
+
+# --- Battery status (shared with the home dashboard's strip) ----------------
+
+
+def test_get_current_readings_flags_a_low_battery(conn):
+    now = datetime(2026, 11, 17, 12, 0, tzinfo=LOCAL_TZ)
+    _add_entity(conn, 1, "sensor.drybox_th02_battery")
+    _add_state(conn, 1, "17", now - timedelta(minutes=5))
+    _add_entity(conn, 2, "sensor.desk_th03_battery")
+    _add_state(conn, 2, "77", now - timedelta(minutes=5))
+
+    readings = get_current_readings(conn, now)
+
+    assert (readings["TH02"].battery_pct, readings["TH02"].battery_status) == (17.0, "low")
+    assert (readings["TH03"].battery_pct, readings["TH03"].battery_status) == (77.0, "ok")
+    assert (readings["TH01"].battery_pct, readings["TH01"].battery_status) == (None, "not_reporting")
+
+
+def test_get_current_readings_battery_rides_out_a_short_gap_but_not_a_long_one(conn):
+    now = datetime(2026, 11, 17, 12, 0, tzinfo=LOCAL_TZ)
+    _add_entity(conn, 1, "sensor.wineador_th01_battery")
+    _add_state(conn, 1, "83", now - timedelta(hours=3))
+    _add_state(conn, 1, "unavailable", now - timedelta(minutes=2))
+    _add_entity(conn, 2, "sensor.drybox_th02_battery")
+    _add_state(conn, 2, "4", now - timedelta(hours=3))
+    _add_state(conn, 2, "unavailable", now - timedelta(hours=1))
+
+    readings = get_current_readings(conn, now)
+
+    assert (readings["TH01"].battery_pct, readings["TH01"].battery_status) == (83.0, "ok")
+    assert (readings["TH02"].battery_pct, readings["TH02"].battery_status) == (None, "not_reporting")
+
+
+def test_get_battery_statuses_is_keyed_by_device_id_with_location_labels(conn):
+    now = datetime(2026, 11, 17, 12, 0, tzinfo=LOCAL_TZ)
+
+    statuses = get_battery_statuses(conn, now)
+
+    assert list(statuses) == list(DEVICE_IDS)
+    assert [s.label for s in statuses.values()] == ["Wineador", "Drybox", "Desk"]

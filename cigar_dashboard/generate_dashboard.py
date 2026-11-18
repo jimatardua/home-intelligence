@@ -40,7 +40,7 @@ def _build_context(db_path: Path) -> DashboardContext:
 
     return DashboardContext(
         generated_at=now_local,
-        readings=get_current_readings(conn),
+        readings=get_current_readings(conn, now_local),
         humidity_history=humidity_history,
         temp_history=temp_history,
         collector_health=get_collector_health(conn),

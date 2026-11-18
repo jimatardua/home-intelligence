@@ -79,6 +79,18 @@ HEALTH_STATUS_STALE = "stale"
 HEALTH_STATUS_STUCK = "stuck"
 
 
+# A packet whose battery level differs from the last accepted one by more
+# than this is held back until the very next packet from that sensor agrees
+# with it -- see apply_advertisement(). Measured against 3 months of real
+# data from these three sensors: 16 recorded corrupt packets (battery 0 or
+# 62 on a sensor sitting at 81-100%; the >100 ones are rejected earlier, in
+# decode.py), every one a single isolated packet at least 25 points off,
+# while genuine discharge never moved more than a point or two between
+# packets even on the Drybox's final 86% -> 4% slide. 10 sits well clear of
+# both.
+MAX_UNCONFIRMED_BATTERY_STEP = 10
+
+
 @dataclass(frozen=True)
 class DeviceState:
     temp_f: float
@@ -86,6 +98,13 @@ class DeviceState:
     battery_pct: int
     rssi: int
     last_seen: float  # time.time() -- logging/debugging only, not published
+    # Battery level of a held-back packet awaiting confirmation (see
+    # MAX_UNCONFIRMED_BATTERY_STEP), or None. Never published.
+    unconfirmed_battery_pct: int | None = None
+
+
+def _is_battery_jump(battery_pct: int, reference_pct: int) -> bool:
+    return abs(battery_pct - reference_pct) > MAX_UNCONFIRMED_BATTERY_STEP
 
 
 def apply_advertisement(
@@ -105,6 +124,18 @@ def apply_advertisement(
     too-short/corrupt payload are silently ignored -- the caller doesn't
     need to distinguish "not a Govee sensor" from "not one of ours" from
     "garbled packet," all three just mean "no update this time."
+
+    One more class of garbled packet decodes cleanly and so can't be caught
+    by decode_h5075(): a single packet reporting a wildly different battery
+    level (in practice 0%, on a healthy sensor), sometimes with garbage
+    temperature/humidity alongside it. Such a packet is held back -- the
+    reading is left untouched and only its battery level is remembered --
+    and is applied only if the next packet from the same sensor agrees with
+    it. A real jump (fresh batteries: 4% -> 100%) therefore lands one
+    packet late, a couple of seconds; an isolated corrupt packet never
+    lands at all. A held packet still returns a new dict, because an
+    advertisement genuinely did arrive and the caller's stall watchdog
+    keys off exactly that.
     """
     device_id = SENSORS.get(mac.upper())
     if device_id is None:
@@ -119,6 +150,18 @@ def apply_advertisement(
         return state
 
     new_state = dict(state)
+    current = state.get(device_id)
+    if (
+        current is not None
+        and _is_battery_jump(decoded.battery_pct, current.battery_pct)
+        and (
+            current.unconfirmed_battery_pct is None
+            or _is_battery_jump(decoded.battery_pct, current.unconfirmed_battery_pct)
+        )
+    ):
+        new_state[device_id] = replace(current, unconfirmed_battery_pct=decoded.battery_pct)
+        return new_state
+
     new_state[device_id] = DeviceState(
         temp_f=decoded.temp_f,
         humidity_pct=decoded.humidity_pct,

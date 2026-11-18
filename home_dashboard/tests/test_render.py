@@ -16,6 +16,8 @@ from zoneinfo import ZoneInfo
 
 from home_dashboard.render import BG_COLOR, DashboardContext, render_data_json, render_html, render_manifest_json
 
+from site_shared.battery import STATUS_LOW, STATUS_NOT_REPORTING, STATUS_OK, BatteryStatus
+
 TZ = ZoneInfo("America/Denver")
 
 
@@ -26,7 +28,6 @@ def _minimal_context() -> DashboardContext:
         outdoor_temp_f=82.0,
         outdoor_humidity_pct=30.0,
         condition="sunny",
-        outdoor_battery_pct=90.0,
         indoor_temp_f=75.0,
         indoor_humidity_pct=40.0,
         hvac_mode="cool",
@@ -193,3 +194,65 @@ def test_render_html_includes_theme_watch_script_for_os_scheme_changes():
     assert "matchMedia" in html
     assert "themechange" in html
     assert "let lastHistory = null;" in html
+
+
+# --- Battery strip -----------------------------------------------------------
+
+
+def _batteries(drybox: BatteryStatus) -> list[BatteryStatus]:
+    return [
+        BatteryStatus("Outdoor", 100.0, STATUS_OK),
+        BatteryStatus("Wineador", 83.0, STATUS_OK),
+        drybox,
+        BatteryStatus("Desk", 77.0, STATUS_OK),
+    ]
+
+
+def test_data_json_lists_batteries_in_display_order_with_no_alert_when_all_ok():
+    ctx = replace(_minimal_context(), batteries=_batteries(BatteryStatus("Drybox", 100.0, STATUS_OK)))
+
+    data = json.loads(render_data_json(ctx))
+
+    assert [b["label"] for b in data["batteries"]] == ["Outdoor", "Wineador", "Drybox", "Desk"]
+    assert data["batteries"][1] == {"label": "Wineador", "pct": 83.0, "status": "ok"}
+    assert data["battery_alert"] is None
+
+
+def test_data_json_low_battery_alert_names_the_sensor():
+    ctx = replace(_minimal_context(), batteries=_batteries(BatteryStatus("Drybox", 17.0, STATUS_LOW)))
+
+    data = json.loads(render_data_json(ctx))
+
+    assert data["batteries"][2] == {"label": "Drybox", "pct": 17.0, "status": "low"}
+    assert data["battery_alert"] == {"severity": "low", "text": "Replace Drybox batteries"}
+
+
+def test_data_json_dead_sensor_alert_has_no_stale_percentage():
+    ctx = replace(_minimal_context(), batteries=_batteries(BatteryStatus("Drybox", None, STATUS_NOT_REPORTING)))
+
+    data = json.loads(render_data_json(ctx))
+
+    assert data["batteries"][2] == {"label": "Drybox", "pct": None, "status": "not_reporting"}
+    assert data["battery_alert"] == {"severity": "not_reporting", "text": "Drybox sensor not reporting"}
+
+
+def test_data_json_with_no_batteries_at_all_is_an_empty_strip_not_an_error():
+    data = json.loads(render_data_json(_minimal_context()))
+
+    assert data["batteries"] == []
+    assert data["battery_alert"] is None
+
+
+def test_html_has_the_battery_strip_and_styles_for_both_alert_states():
+    html = render_html(_minimal_context())
+
+    assert 'id="battery-strip"' in html
+    assert "renderBatteries(d.batteries, d.battery_alert)" in html
+    # The CSS class names are the status strings themselves, so the page
+    # can't drift from site_shared.battery's vocabulary.
+    assert f".battery-item.{STATUS_LOW}" in html
+    assert f".battery-item.{STATUS_NOT_REPORTING}" in html
+    assert "var(--caution)" in html
+    # The old lone, unlabeled outdoor readout is gone, not left alongside.
+    assert "battery-corner" not in html
+    assert "outdoor_battery_pct" not in html
