@@ -11,7 +11,7 @@ same way the other three pages do.
 
 from __future__ import annotations
 
-from site_shared import nav, theme
+from site_shared import favicon, nav, theme
 
 from control_panel.const import (
     HVAC_MODE_LABELS,
@@ -56,6 +56,7 @@ def render_html() -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Control Panel</title>
+{favicon.render_favicon_links()}
 {theme.render_theme_bootstrap_script()}
 <style>
 {theme.render_theme_style_block()}

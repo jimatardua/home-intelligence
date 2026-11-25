@@ -23,6 +23,8 @@ from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 
+from site_shared.favicon import install_favicon_files
+
 from .archive_loader import coverage_by_date, load_archive
 from .billing import MonthlyCost, compute_schedule1_cost, compute_tou_cost, total_cost
 from .disaggregation import disaggregate_hour
@@ -367,6 +369,8 @@ def main() -> int:
     ctx = _build_report_context(args.archive_dir, args.db_path)
     html = render_report(ctx)
     _atomic_write(args.output, html)
+    # Icons go next to index.html -- the page links them by relative href.
+    install_favicon_files(args.output.parent)
     print(f"Wrote {args.output} ({ctx.day_count} day(s) of data, tier={ctx.maturity_tier})")
     return 0
 

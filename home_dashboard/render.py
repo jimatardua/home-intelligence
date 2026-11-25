@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 
-from site_shared import nav, theme
+from site_shared import favicon, nav, theme
 from site_shared.battery import STATUS_LOW, STATUS_NOT_REPORTING, BatteryStatus, battery_alert_message
 from site_shared.theme import DARK as DARK_THEME
 
@@ -285,6 +285,7 @@ def render_html(ctx: DashboardContext) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Home</title>
+{favicon.render_favicon_links()}
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">

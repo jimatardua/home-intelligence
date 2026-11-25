@@ -46,6 +46,11 @@ site_shared/
   battery.py -- ok / low / not-reporting status for battery-powered sensors,
                 shared by home_dashboard's battery strip and cigar_dashboard's
                 cards (see docs/home-dashboard.md, "Battery strip")
+  favicon.py -- shared browser-tab icon (a house): <link rel="icon"> tags and
+                install_favicon_files(), which copies favicon_files/* next to
+                each page's index.html (see "Favicon" below)
+  favicon_files/ -- favicon.ico / favicon.svg / favicon-32.png (generated)
+  favicon-src/   -- source art: chosen.svg plus runner-ups alt-b/alt-c.svg
 ```
 
 `battery.py` is the one module here that isn't pure presentation: it reads
@@ -192,6 +197,33 @@ a spec-correct no-op on iOS. Real fix for Android, harmless for iOS.
 `cigar_dashboard`/`energy_report` gained no manifest/apple-touch-icon link
 at all -- explicitly verified via a regression-guard test in both packages'
 suites (`rel="manifest"` / `rel="apple-touch-icon"` absent).
+
+### Favicon
+
+All four pages (`/dashboard/`, `/cigars/`, `/energy-report/`, `/control/`)
+share one tab icon, so they're recognizable in a tab bar but not
+distinguishable from each other. `favicon.render_favicon_links()` emits
+three `rel="icon"` tags (ico, svg, 32 px png) with **relative** hrefs, and
+each page's generator calls `favicon.install_favicon_files(output_dir)` to
+copy the files next to its `index.html` -- the same "the generator is the
+only way to put a static file in output/" mechanism home_dashboard already
+uses for its manifest. No nginx change, no new bind mount.
+
+- **No root `/favicon.ico`.** The root of domus.ardua.com belongs to Home
+  Assistant (ha-proxy's catch-all `location /`), so Safari's direct
+  `/favicon.ico` request still gets HA's icon; the per-page link tags are
+  what override it.
+- **No apple-touch-icon from here.** `cigar_dashboard`/`energy_report`/
+  `control_panel` deliberately stay non-installable (see above), and
+  `home_dashboard` keeps its own PWA touch icon (`generate_pwa_icons.py`).
+- **Deploy order matters:** `site_shared/deploy.sh` must run before (or
+  with) any page's deploy, or that page's generator fails on
+  `import site_shared.favicon`. control_panel's static shell must be
+  regenerated once by hand (`generate_page.py`); the other three pick the
+  icon up on their next cron run.
+- To regenerate the files from `favicon-src/chosen.svg`, use the favicon
+  skill's `generate.py` into `favicon_files/`, then delete the
+  `apple-touch-icon.png` it also writes (unused).
 
 ## Rollout order and why
 

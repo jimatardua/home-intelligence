@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from site_shared import favicon
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -408,3 +410,10 @@ def test_card_styles_cover_both_alert_states_and_the_refresh_script_keeps_them_c
     assert ".card .battery.low{color:var(--caution)" in html
     assert ".card .battery.not_reporting{color:var(--warn)" in html
     assert "batteryEl.className = 'battery ' + (dev.battery_status || '')" in html
+
+
+def test_render_html_links_the_shared_favicon():
+    html = render_html(_minimal_context())
+
+    assert 'rel="icon"' in html
+    assert favicon.render_favicon_links() in html

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from site_shared import favicon
+
 from control_panel.const import (
     ALEXA_ENTITY,
     DINING_COVERS,
@@ -125,3 +127,10 @@ def test_render_html_reuses_shared_action_button_wiring_for_speaker_and_blinds()
     assert "function wireActionButtons(" in html
     assert "wireActionButtons(\n  '.blind-btn'" in html
     assert "wireActionButtons(\n  '.speaker-btn'" in html
+
+
+def test_render_html_links_the_shared_favicon():
+    html = render_html()
+
+    assert 'rel="icon"' in html
+    assert favicon.render_favicon_links() in html

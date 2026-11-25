@@ -9,6 +9,8 @@ and is out of scope for this change.
 
 from __future__ import annotations
 
+from site_shared import favicon
+
 import json
 from dataclasses import replace
 from datetime import datetime
@@ -256,3 +258,16 @@ def test_html_has_the_battery_strip_and_styles_for_both_alert_states():
     # The old lone, unlabeled outdoor readout is gone, not left alongside.
     assert "battery-corner" not in html
     assert "outdoor_battery_pct" not in html
+
+
+def test_render_html_links_the_shared_favicon():
+    html = render_html(_minimal_context())
+
+    assert 'rel="icon"' in html
+    assert favicon.render_favicon_links() in html
+
+
+def test_render_html_has_exactly_one_apple_touch_icon_link():
+    # The shared favicon tags must not add a second touch icon on top of
+    # home_dashboard's own PWA one.
+    assert render_html(_minimal_context()).count('rel="apple-touch-icon"') == 1
