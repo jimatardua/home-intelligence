@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from site_shared import nav, theme
+from site_shared import favicon, nav, theme
 from site_shared.battery import STATUS_LOW, STATUS_NOT_REPORTING
 
 from cigar_dashboard.govee_history import (
@@ -224,6 +224,7 @@ def render_html(ctx: DashboardContext) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cigar Storage</title>
+{favicon.render_favicon_links()}
 {theme.render_theme_bootstrap_script()}
 <style>
 {theme.render_theme_style_block()}

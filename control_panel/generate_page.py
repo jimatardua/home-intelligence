@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from control_panel.render import render_html
+from site_shared.favicon import install_favicon_files
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -30,7 +31,8 @@ def main() -> int:
     args = parser.parse_args()
 
     _atomic_write(args.output_dir / "index.html", render_html())
-    print(f"Wrote {args.output_dir}/index.html")
+    install_favicon_files(args.output_dir)
+    print(f"Wrote {args.output_dir}/index.html and favicon files")
     return 0
 
 

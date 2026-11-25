@@ -6,6 +6,9 @@ in the root `VERSION` file (this project has no single package manifest, so
 `manifest.json` version is independent, scoped to Home Assistant's own
 per-integration update tracking).
 
+## [1.0.54] - 2026-11-25
+- Add a shared favicon (lime house) to every domus dashboard via `site_shared/favicon.py`. Deploy `site_shared` first.
+
 ## [1.0.53] - 2026-11-18
 
 - Low-battery indicator for the battery-powered sensors, prompted by the

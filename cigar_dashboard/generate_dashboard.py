@@ -22,6 +22,7 @@ from cigar_dashboard.govee_history import (
 )
 from cigar_dashboard.render import DashboardContext, render_data_json, render_html
 from energy_report.ha_recorder import open_recorder_db
+from site_shared.favicon import install_favicon_files
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -58,7 +59,8 @@ def main() -> int:
     ctx = _build_context(args.db_path)
     _atomic_write(args.output_dir / "index.html", render_html(ctx))
     _atomic_write(args.output_dir / "data.json", render_data_json(ctx))
-    print(f"Wrote {args.output_dir}/index.html and data.json")
+    install_favicon_files(args.output_dir)
+    print(f"Wrote {args.output_dir}/index.html, data.json, and favicon files")
     return 0
 
 

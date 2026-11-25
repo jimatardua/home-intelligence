@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 import json
 
-from site_shared import nav, theme
+from site_shared import favicon, nav, theme
 
 from .archive_loader import LOCAL_TZ
 from .disaggregation import AC_ESTIMATED_KW
@@ -316,6 +316,7 @@ def render_report(ctx: ReportContext) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="refresh" content="3600">
 <title>RMP: Standard vs. Time-of-Use</title>
+{favicon.render_favicon_links()}
 {theme.render_theme_bootstrap_script()}
 {_CHARTJS_SCRIPT}
 {_CHARTJS_DATE_ADAPTER_SCRIPT}

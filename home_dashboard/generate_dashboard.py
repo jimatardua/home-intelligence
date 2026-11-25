@@ -37,6 +37,7 @@ from home_dashboard.temp_history import (
 )
 from home_dashboard.usage_today import get_usage_today
 from site_shared.battery import BatteryStatus, read_battery
+from site_shared.favicon import install_favicon_files
 
 OUTDOOR_TEMP_ENTITY = "sensor.eve_weather_20ebs9901_temperature"
 OUTDOOR_HUMIDITY_ENTITY = "sensor.eve_weather_20ebs9901_humidity"
@@ -181,9 +182,10 @@ def main() -> int:
     _atomic_write(args.output_dir / "manifest.json", render_manifest_json())
     _atomic_write_bytes(args.output_dir / "apple-touch-icon.png", apple_touch_icon_png_bytes())
     _atomic_write_bytes(args.output_dir / "icon-512.png", app_icon_512_png_bytes())
+    install_favicon_files(args.output_dir)
     print(
         f"Wrote {args.output_dir}/index.html, data.json, manifest.json, "
-        "apple-touch-icon.png, and icon-512.png"
+        "apple-touch-icon.png, icon-512.png, and favicon files"
     )
     return 0
 

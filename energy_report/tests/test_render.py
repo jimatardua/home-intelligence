@@ -8,6 +8,8 @@ full coverage of the pre-existing chart code.
 
 from __future__ import annotations
 
+from site_shared import favicon
+
 from datetime import date, datetime, timezone
 
 from energy_report.render import DailyBreakdown, ReportContext, RmpSyncHealth, _chart_series, render_report
@@ -245,3 +247,10 @@ def test_render_report_setTab_is_scoped_not_global():
     assert "function setTab(scope, name, btn)" in html
     assert "btn.closest('.tabs')" in html
     assert "data-scope=\"' + scope + '\"" in html
+
+
+def test_render_report_links_the_shared_favicon():
+    html = render_report(_minimal_ctx())
+
+    assert 'rel="icon"' in html
+    assert favicon.render_favicon_links() in html
